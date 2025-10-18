@@ -2,11 +2,9 @@
 
 <div align="center">
 
-<svg width="260" height="32" xmlns="http://www.w3.org/2000/svg">
-  <rect width="260" height="32" rx="6" fill="#1a1a1a" />
-  <rect x="2" y="2" width="256" height="28" rx="4" fill="none" stroke="#404040" stroke-width="1" />
-  <text x="130" y="21" font-family="ui-monospace, monospace" font-size="13" fill="#a0a0a0" text-anchor="middle">α1.1 • alpha 1 draft</text>
-</svg>
+```
+α1.1 • alpha 1 draft
+```
 
 </div>
 
@@ -18,7 +16,8 @@
 
 ## 0. Design Pillars
 
-> [!IMPORTANT] > **Core Philosophy:** Explicit control, predictable behavior, zero-cost abstractions
+> [!IMPORTANT]
+> **Core Philosophy:** Explicit control, predictable behavior, zero-cost abstractions
 
 1. **immutability-first** — `const` by default; `var` for mutation; `inout` to pass by reference explicitly.
 2. **errors as values** — no exceptions; typed error domains; lightweight propagation (`ok`, `err`, `check`, `ensure`, `map_error`) with automatic **context frames**.
