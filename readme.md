@@ -2,9 +2,7 @@
 
 <div align="center">
 
-```
-α1.1 • alpha 1 draft
-```
+α1 • alpha 1 draft
 
 </div>
 
@@ -12,12 +10,15 @@
 > **scope:** full surface syntax + semantics overview; developer experience and usage rules; no implementation details  
 > **design goal:** a low-level, modern systems language with explicit memory, strong/expressive types, **errors as values**, structured concurrency, capability-based security
 
+> [!TIP] > **Additional Documentation:**
+>
+> - [Package Management & Tooling](package-management.md) — dependency management, build system, CLI tools
+
 ---
 
 ## 0. Design Pillars
 
-> [!IMPORTANT]
-> **Core Philosophy:** Explicit control, predictable behavior, zero-cost abstractions
+> [!IMPORTANT] > **Core Philosophy:** Explicit control, predictable behavior, zero-cost abstractions
 
 1. **immutability-first** — `const` by default; `var` for mutation; `inout` to pass by reference explicitly.
 2. **errors as values** — no exceptions; typed error domains; lightweight propagation (`ok`, `err`, `check`, `ensure`, `map_error`) with automatic **context frames**.
@@ -35,6 +36,7 @@
 ## 1. Lexical Structure
 
 - **source file encoding:** utf-8.
+- **source file extension:** `.fe` (e.g., `main.fe`, `server.fe`)
 - **identifiers:** `[_A-Za-z][_0-9A-Za-z]*` (unicode letters allowed).
 - **whitespace:** spaces, tabs, newlines; insignificant except in strings/comments.
 - **comments:**
@@ -268,6 +270,20 @@ function save(path: Path, data: View<u8>, cap fs: Fs) -> Unit error IoError effe
 
 - **`cap`** marks a parameter as a capability; tools can track/verify capability flows.
 
+### 7.4 Package Management & Tooling
+
+> [!NOTE]
+> For detailed information on package management, dependency resolution, version pinning, build tooling, and CLI commands, see **[package-management.md](package-management.md)**.
+
+Key features:
+
+- **Content-addressed packages** with human-readable manifests (`Package.fe`)
+- **Pinned versions by default** for reproducible builds
+- **Full dependency DAG** with transparent transitive dependencies
+- **Text-based lockfile** (`ferrule.lock`) that's git-friendly
+- **Modern CLI tooling** with LSP integration and graph visualization
+- **Provenance tracking** and security guarantees
+
 ---
 
 ## 8. Memory Model: Regions & Views
@@ -473,12 +489,126 @@ if raw == null { return err NotFound { path: name_as_path(name) } }
 
 ## 16. Diagnostics & Lints (Developer Experience)
 
+### 16.1 Compile-Time Checks
+
 - **exhaustiveness checks** for `match`, error domains, and effect coverage.
 - **no implicit boolean coercion**: `if value` is rejected; use `if value === true`.
 - **no implicit numeric coercion**: conversions must be explicit (e.g., `u32(x)`).
 - **region safety**: cross-region view misuse is flagged.
 - **capability flow**: missing or unused `cap` parameters are flagged.
 - **determinism mode**: bans nondeterministic effects unless explicitly annotated.
+
+### 16.2 Helpful Error Messages
+
+Ferrule prioritizes clear, actionable error messages with precise locations, explanations, and hints.
+
+#### Effect Mismatch
+
+```bash
+error: effect not declared
+  ┌─ src/server.fe:12:15
+  │
+12│   const data = fs.read_all(path);
+  │                ^^^^^^^^^^^^^^^^^ function requires effect [fs]
+  │
+  = note: fs.read_all has effects [fs]
+  = help: add 'effects [fs]' to function signature:
+          function load_config(...) -> Config effects [fs] { ... }
+```
+
+#### Missing Error Handling
+
+```bash
+error: unhandled fallible result
+  ┌─ src/parser.fe:8:18
+  │
+ 8│   const port = parse_port(input);
+  │                ^^^^^^^^^^^^^^^^^^ returns Result<Port, ParseError>
+  │
+  = note: parse_port can fail with ParseError
+  = help: handle the error using one of:
+          • check parse_port(input)      -- propagate error
+          • match parse_port(input) { ... }  -- handle explicitly
+          • parse_port(input).unwrap()   -- panic on error (tests only)
+```
+
+#### Implicit Boolean Coercion
+
+```bash
+error: expected Bool, found u32?
+  ┌─ src/main.fe:15:8
+  │
+15│   if count {
+  │      ^^^^^ type is u32?, not Bool
+  │
+  = note: ferrule does not allow implicit boolean coercion
+  = help: be explicit about the condition:
+          • if count !== null { ... }
+          • if count !== null && count !== 0 { ... }
+```
+
+#### Missing Capability Parameter
+
+```bash
+error: effect [fs] requires capability
+  ┌─ src/io.fe:22:1
+  │
+22│ function read_config(path: Path) -> Config error IoError effects [fs] {
+  │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  │
+  = note: function declares effect [fs] but has no Fs capability parameter
+  = help: add capability parameter:
+          function read_config(path: Path, cap fs: Fs) -> Config error IoError effects [fs]
+```
+
+#### Non-Exhaustive Match
+
+```bash
+error: non-exhaustive match
+  ┌─ src/http.fe:45:3
+  │
+45│   match response {
+  │   ^^^^^ missing coverage for HttpResponse variants
+  │
+46│     Ok { data } -> process(data);
+47│     NotFound -> log.warn("not found");
+48│   }
+  │
+  = note: HttpResponse has 5 variants: Ok, NotFound, Forbidden, ServerError, Timeout
+  = help: missing patterns:
+          • Forbidden { ... }
+          • ServerError { ... }
+          • Timeout { ... }
+          or add a catch-all: _ -> ...
+```
+
+#### Region Safety Violation
+
+```bash
+error: view outlives region
+  ┌─ src/buffer.fe:18:10
+  │
+18│   return buf;
+  │          ^^^ view bound to region 'arena' which is disposed at line 19
+  │
+17│   const buf = arena.alloc<u8>(1024);
+  │               ----- region created here
+19│   defer arena.dispose();
+  │         ----- region disposed here
+  │
+  = help: either return the region with the view, or copy data to outer region:
+          • return { buf: buf, region: arena }
+          • return view.copy(buf, to = region.heap())
+```
+
+**error message principles:**
+
+- **precise location**: line/column with source context
+- **clear explanation**: what went wrong and why
+- **actionable hints**: specific steps to fix the issue
+- **show related locations**: where types/regions/effects were defined
+- **consistent format**: same structure across compiler, package manager, and runtime
+- **no jargon**: accessible to developers at all levels
 
 ---
 
