@@ -1,0 +1,31 @@
+package example.hello;
+
+domain IoError {
+  NotFound { path: String }
+  Denied { path: String }
+  Interrupted { op: String }
+}
+
+use error IoError;
+
+function add(x: i32, y: i32) -> i32 {
+  return x + y;
+}
+
+function greet(name: tring) -> tring {
+  const greeting = "hello";
+  return greeting;
+}
+
+function main() -> i32 {
+  const x = 10;
+  const y = 20;
+  const result = add(x, y);
+  
+  if result === 30 {
+    return "0";
+  } else {
+    return 1;
+  }
+}
+

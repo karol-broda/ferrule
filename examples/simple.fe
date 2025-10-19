@@ -1,0 +1,9 @@
+function add(x: i32, y: i32) -> i32 {
+  return x + y;
+}
+
+function main() -> i32 {
+  const result = add(5, 3);
+  return result;
+}
+

@@ -1,0 +1,37 @@
+function fibonacci(n: u32) -> u32 {
+  if n === 0 {
+    return 0;
+  } else {
+    if n === 1 {
+      return 1;
+    } else {
+      return fibonacci(n - 1) + fibonacci(n - 2);
+    }
+  }
+}
+
+function count_to_ten() -> u32 {
+  var i = 0;
+  while i < 10 {
+    i = i + 1;
+  }
+  return i;
+}
+
+function sum_array(items: Array) -> i32 {
+  var total = 0;
+  for item in items {
+    total = total + item;
+  }
+  return total;
+}
+
+function classify(code: u32) -> String {
+  match code {
+    200 -> "ok";
+    404 -> "not found";
+    500 -> "server error";
+    _   -> "unknown";
+  }
+}
+

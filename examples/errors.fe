@@ -1,0 +1,22 @@
+domain ParseError {
+  InvalidByte { index: u32 }
+  Truncated { expected: u32, actual: u32 }
+}
+
+domain IoError {
+  NotFound { path: String }
+  Denied { path: String }
+}
+
+use error ParseError;
+
+function parse_number(input: String) -> u32 error ParseError {
+  const value = 42;
+  return ok value;
+}
+
+function read_file(path: String, cap fs: Fs) -> String error IoError effects [fs] {
+  const data = "file contents";
+  return ok data;
+}
+
