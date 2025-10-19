@@ -20,6 +20,7 @@
         pkgs.mkShell {
           packages = [
             pkgs-unstable.zig
+            pkgs-unstable.bun
           ];
 
           shellHook = ''

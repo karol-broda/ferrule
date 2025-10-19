@@ -1,0 +1,169 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Ferrule",
+  "scopeName": "source.ferrule",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#keywords" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#operators" },
+    { "include": "#types" },
+    { "include": "#functions" },
+    { "include": "#constants" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.ferrule",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.ferrule",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.ferrule",
+          "match": "\\b(if|else|match|for|while|break|continue|return|defer)\\b"
+        },
+        {
+          "name": "keyword.declaration.ferrule",
+          "match": "\\b(const|var|function|type|role|domain|effects|capability|component)\\b"
+        },
+        {
+          "name": "keyword.other.ferrule",
+          "match": "\\b(package|import|export|use|error|as|where|with|context|inout|comptime|derivation|asm|using|in|ok|err|check|ensure|map_error|cap)\\b"
+        },
+        {
+          "name": "storage.modifier.ferrule",
+          "match": "\\b(const|var|inout)\\b"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.ferrule",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.ferrule",
+              "match": "\\\\(n|r|t|\\\\|\")"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.ferrule",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.ferrule",
+              "match": "\\\\(n|r|t|\\\\|')"
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.ferrule",
+          "match": "\\b0x[0-9a-fA-F]+\\b"
+        },
+        {
+          "name": "constant.numeric.binary.ferrule",
+          "match": "\\b0b[01]+\\b"
+        },
+        {
+          "name": "constant.numeric.octal.ferrule",
+          "match": "\\b0o[0-7]+\\b"
+        },
+        {
+          "name": "constant.numeric.float.ferrule",
+          "match": "\\b[0-9]+\\.[0-9]+([eE][+-]?[0-9]+)?\\b"
+        },
+        {
+          "name": "constant.numeric.integer.ferrule",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.comparison.ferrule",
+          "match": "(===|!==|<=|>=|<|>)"
+        },
+        {
+          "name": "keyword.operator.logical.ferrule",
+          "match": "(&&|\\|\\||!)"
+        },
+        {
+          "name": "keyword.operator.arithmetic.ferrule",
+          "match": "(\\+|-|\\*|/|%)"
+        },
+        {
+          "name": "keyword.operator.bitwise.ferrule",
+          "match": "(&|\\||\\^|~|<<|>>)"
+        },
+        {
+          "name": "keyword.operator.assignment.ferrule",
+          "match": "="
+        },
+        {
+          "name": "keyword.operator.arrow.ferrule",
+          "match": "(->|=>)"
+        },
+        {
+          "name": "keyword.operator.other.ferrule",
+          "match": "(\\?|:|\\.)"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "support.type.primitive.ferrule",
+          "match": "\\b(i8|i16|i32|i64|i128|u8|u16|u32|u64|u128|usize|f16|f32|f64|Bool|Char|String|Bytes|Unit|Nat)\\b"
+        },
+        {
+          "name": "support.type.compound.ferrule",
+          "match": "\\b(Array|Vector|View|Maybe|Result|Map|Set)\\b"
+        },
+        {
+          "name": "entity.name.type.ferrule",
+          "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "name": "entity.name.function.ferrule",
+          "match": "\\b([a-z_][a-zA-Z0-9_]*)\\s*(?=\\()"
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.boolean.ferrule",
+          "match": "\\b(true|false)\\b"
+        },
+        {
+          "name": "constant.language.null.ferrule",
+          "match": "\\bnull\\b"
+        }
+      ]
+    }
+  }
+}
+

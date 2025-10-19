@@ -189,10 +189,11 @@ pub const SemanticAnalyzer = struct {
 
     pub fn printDiagnosticsDebug(self: *const SemanticAnalyzer) void {
         const stderr = std.debug;
+        const colors = diagnostics.ColorConfig.init();
         for (self.diagnostics_list.diagnostics.items) |diag| {
             var buf = std.ArrayList(u8){};
             defer buf.deinit(self.allocator);
-            diag.formatWithSource(self.diagnostics_list.source_content, buf.writer(self.allocator)) catch {};
+            diag.formatWithSource(self.diagnostics_list.source_content, buf.writer(self.allocator), colors) catch {};
             stderr.print("{s}\n", .{buf.items});
         }
     }

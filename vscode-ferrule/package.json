@@ -1,0 +1,80 @@
+{
+  "name": "ferrule",
+  "displayName": "Ferrule Language Support",
+  "description": "Language support for Ferrule programming language",
+  "version": "0.1.0",
+  "publisher": "ferrule",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:ferrule"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "ferrule",
+        "aliases": [
+          "Ferrule",
+          "ferrule"
+        ],
+        "extensions": [
+          ".fe"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "ferrule",
+        "scopeName": "source.ferrule",
+        "path": "./syntaxes/ferrule.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "Ferrule",
+      "properties": {
+        "ferrule.lspPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the Ferrule LSP server executable. If empty, will try to find ferrule-lsp in PATH."
+        },
+        "ferrule.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the language server."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "bun run compile",
+    "package": "bun run compile && vsce package --no-dependencies --allow-missing-repository --skip-license"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/karol-broda/ferrule"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.75.0",
+    "typescript": "^5.0.0",
+    "@vscode/vsce": "^2.19.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}
+

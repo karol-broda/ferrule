@@ -78,23 +78,25 @@ pub const TypeChecker = struct {
         defer self.current_scope = prev_scope;
         self.current_scope = &new_scope;
 
-        for (func.params) |param| {
-            const param_type = try self.type_resolver.resolve(param.type_annotation);
-            const param_symbol = symbol_table.Symbol{
-                .parameter = .{
-                    .name = param.name,
-                    .type_annotation = param_type,
-                    .is_inout = param.is_inout,
-                    .is_capability = param.is_capability,
-                },
-            };
-            try self.current_scope.insert(param.name, param_symbol);
-        }
-
-        if (self.symbols.lookupGlobal(func.name)) |symbol| {
+        // get the function symbol which already has resolved parameter types from Pass 2
+        const func_symbol_opt = self.symbols.lookupGlobal(func.name);
+        if (func_symbol_opt) |symbol| {
             if (symbol == .function) {
                 var func_symbol = symbol.function;
                 self.current_function = &func_symbol;
+
+                // use already-resolved parameter types from Pass 2
+                for (func.params, func_symbol.params) |param, param_type| {
+                    const param_symbol = symbol_table.Symbol{
+                        .parameter = .{
+                            .name = param.name,
+                            .type_annotation = param_type,
+                            .is_inout = param.is_inout,
+                            .is_capability = param.is_capability,
+                        },
+                    };
+                    try self.current_scope.insert(param.name, param_symbol);
+                }
             }
         }
 

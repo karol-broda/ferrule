@@ -12,7 +12,7 @@ function add(x: i32, y: i32) -> i32 {
   return x + y;
 }
 
-function greet(name: tring) -> tring {
+function greet(name: String) -> String {
   const greeting = "hello";
   return greeting;
 }
@@ -23,7 +23,7 @@ function main() -> i32 {
   const result = add(x, y);
   
   if result === 30 {
-    return "0";
+    return 0;
   } else {
     return 1;
   }
