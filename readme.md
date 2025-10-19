@@ -10,7 +10,8 @@
 > **scope:** full surface syntax + semantics overview; developer experience and usage rules; no implementation details  
 > **design goal:** a low-level, modern systems language with explicit memory, strong/expressive types, **errors as values**, structured concurrency, capability-based security
 
-> [!TIP] > **Additional Documentation:**
+> [!TIP]
+> **Additional Documentation:**
 >
 > - [Package Management & Tooling](package-management.md) — dependency management, build system, CLI tools
 
