@@ -135,8 +135,9 @@ test "check variable declaration with matching types" {
 
     const var_decl = ast.VarDecl{
         .name = "x",
-        .type_annotation = .{ .simple = "i32" },
+        .type_annotation = .{ .simple = .{ .name = "i32", .loc = .{ .line = 1, .column = 1 } } },
         .value = &value,
+        .name_loc = .{ .line = 1, .column = 1 },
     };
 
     try checker.checkVarDecl(var_decl);

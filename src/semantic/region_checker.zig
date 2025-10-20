@@ -143,7 +143,7 @@ pub const RegionChecker = struct {
                         const fa = call.callee.field_access;
                         if (std.mem.eql(u8, fa.field, "dispose")) {
                             if (fa.object.* == .identifier) {
-                                const region_name = fa.object.identifier;
+                                const region_name = fa.object.identifier.name;
                                 for (self.active_regions.items) |*region| {
                                     if (std.mem.eql(u8, region.name, region_name)) {
                                         region.is_disposed = true;

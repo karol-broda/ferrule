@@ -25,8 +25,9 @@ test "region variable should be tracked" {
 
     const var_decl = ast.VarDecl{
         .name = "r",
-        .type_annotation = .{ .simple = "Region" },
+        .type_annotation = .{ .simple = .{ .name = "Region", .loc = .{ .line = 1, .column = 1 } } },
         .value = &value,
+        .name_loc = .{ .line = 1, .column = 1 },
     };
 
     try checker.checkStmt(.{ .var_decl = var_decl });
@@ -317,8 +318,9 @@ test "non-region variables should not be tracked" {
 
     const var_decl = ast.VarDecl{
         .name = "x",
-        .type_annotation = .{ .simple = "i32" },
+        .type_annotation = .{ .simple = .{ .name = "i32", .loc = .{ .line = 1, .column = 1 } } },
         .value = &value,
+        .name_loc = .{ .line = 1, .column = 1 },
     };
 
     try checker.checkStmt(.{ .var_decl = var_decl });

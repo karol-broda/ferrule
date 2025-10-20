@@ -66,7 +66,7 @@ pub const Stmt = union(enum) {
 };
 
 pub const AssignStmt = struct {
-    target: []const u8,
+    target: IdentifierExpr,
     value: *Expr,
 };
 
@@ -74,12 +74,14 @@ pub const ConstDecl = struct {
     name: []const u8,
     type_annotation: ?Type,
     value: *Expr,
+    name_loc: Location,
 };
 
 pub const VarDecl = struct {
     name: []const u8,
     type_annotation: ?Type,
     value: *Expr,
+    name_loc: Location,
 };
 
 pub const Param = struct {
@@ -87,6 +89,7 @@ pub const Param = struct {
     type_annotation: Type,
     is_inout: bool,
     is_capability: bool,
+    name_loc: Location,
 };
 
 pub const FunctionDecl = struct {
@@ -96,11 +99,13 @@ pub const FunctionDecl = struct {
     error_domain: ?[]const u8,
     effects: [][]const u8,
     body: []Stmt,
+    name_loc: Location,
 };
 
 pub const TypeDecl = struct {
     name: []const u8,
     type_expr: Type,
+    name_loc: Location,
 };
 
 pub const DomainVariant = struct {
@@ -111,6 +116,7 @@ pub const DomainVariant = struct {
 pub const DomainDecl = struct {
     name: []const u8,
     variants: []DomainVariant,
+    name_loc: Location,
 };
 
 pub const RoleDecl = struct {
@@ -160,11 +166,16 @@ pub const Pattern = union(enum) {
     },
 };
 
+pub const IdentifierExpr = struct {
+    name: []const u8,
+    loc: Location,
+};
+
 pub const Expr = union(enum) {
     number: []const u8,
     string: []const u8,
     char: []const u8,
-    identifier: []const u8,
+    identifier: IdentifierExpr,
     bool_literal: bool,
     null_literal: void,
     binary: BinaryExpr,
@@ -259,6 +270,10 @@ pub const ImportDecl = struct {
     source: []const u8,
     items: []ImportItem,
     capability: ?[]const u8,
+
+    pub fn deinit(self: *const ImportDecl, allocator: std.mem.Allocator) void {
+        allocator.free(self.items);
+    }
 };
 
 pub const Module = struct {
@@ -283,7 +298,7 @@ pub const Module = struct {
     }
 };
 
-fn deinitStmt(stmt: *const Stmt, allocator: std.mem.Allocator) void {
+pub fn deinitStmt(stmt: *const Stmt, allocator: std.mem.Allocator) void {
     switch (stmt.*) {
         .const_decl => |cd| {
             if (cd.type_annotation) |ta| {
@@ -376,7 +391,7 @@ fn deinitStmt(stmt: *const Stmt, allocator: std.mem.Allocator) void {
     }
 }
 
-fn deinitExpr(expr: *const Expr, allocator: std.mem.Allocator) void {
+pub fn deinitExpr(expr: *const Expr, allocator: std.mem.Allocator) void {
     switch (expr.*) {
         .binary => |be| {
             deinitExpr(be.left, allocator);

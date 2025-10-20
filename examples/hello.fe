@@ -18,8 +18,8 @@ function greet(name: String) -> String {
 }
 
 function main() -> i32 {
-  const x = 10;
-  const y = 20;
+  const x: i32 = 10;
+  const y: i32 = 20;
   const result = add(x, y);
   
   if result === 30 {

@@ -161,7 +161,7 @@ pub const EffectChecker = struct {
         switch (expr.*) {
             .call => |ce| {
                 if (ce.callee.* == .identifier) {
-                    const func_name = ce.callee.identifier;
+                    const func_name = ce.callee.identifier.name;
                     if (self.symbols.lookupGlobal(func_name)) |symbol| {
                         if (symbol == .function) {
                             const func = symbol.function;

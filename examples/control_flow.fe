@@ -11,15 +11,15 @@ function fibonacci(n: u32) -> u32 {
 }
 
 function count_to_ten() -> u32 {
-  var i = 0;
+  var i: u32 = 0;
   while i < 10 {
     i = i + 1;
   }
   return i;
 }
 
-function sum_array(items: Array) -> i32 {
-  var total = 0;
+function sum_array(items: Array<i32>) -> i32 {
+  var total: i32 = 0;
   for item in items {
     total = total + item;
   }

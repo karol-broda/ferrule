@@ -3,6 +3,7 @@ const ast = @import("../ast.zig");
 const symbol_table = @import("../symbol_table.zig");
 const error_domains = @import("../error_domains.zig");
 const diagnostics = @import("../diagnostics.zig");
+const symbol_locations = @import("../symbol_locations.zig");
 
 pub const DeclarationCollector = struct {
     symbols: *symbol_table.SymbolTable,
@@ -10,6 +11,7 @@ pub const DeclarationCollector = struct {
     diagnostics_list: *diagnostics.DiagnosticList,
     allocator: std.mem.Allocator,
     source_file: []const u8,
+    location_table: *symbol_locations.SymbolLocationTable,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -17,6 +19,7 @@ pub const DeclarationCollector = struct {
         domains: *error_domains.ErrorDomainTable,
         diagnostics_list: *diagnostics.DiagnosticList,
         source_file: []const u8,
+        location_table: *symbol_locations.SymbolLocationTable,
     ) DeclarationCollector {
         return .{
             .symbols = symbols,
@@ -24,6 +27,7 @@ pub const DeclarationCollector = struct {
             .diagnostics_list = diagnostics_list,
             .allocator = allocator,
             .source_file = source_file,
+            .location_table = location_table,
         };
     }
 
@@ -114,6 +118,13 @@ pub const DeclarationCollector = struct {
         };
 
         try self.symbols.insertGlobal(func.name, symbol);
+
+        try self.location_table.addDefinition(
+            func.name,
+            func.name_loc.line,
+            func.name_loc.column,
+            func.name.len,
+        );
     }
 
     pub fn collectTypeDecl(self: *DeclarationCollector, type_decl: ast.TypeDecl) !void {
@@ -143,6 +154,13 @@ pub const DeclarationCollector = struct {
         };
 
         try self.symbols.insertGlobal(type_decl.name, symbol);
+
+        try self.location_table.addDefinition(
+            type_decl.name,
+            type_decl.name_loc.line,
+            type_decl.name_loc.column,
+            type_decl.name.len,
+        );
     }
 
     pub fn collectDomain(self: *DeclarationCollector, domain: ast.DomainDecl) !void {
@@ -186,6 +204,13 @@ pub const DeclarationCollector = struct {
         };
 
         try self.domains.insert(domain.name, error_domain);
+
+        try self.location_table.addDefinition(
+            domain.name,
+            domain.name_loc.line,
+            domain.name_loc.column,
+            domain.name.len,
+        );
     }
 
     pub fn collectRole(self: *DeclarationCollector, role: ast.RoleDecl) !void {
@@ -244,6 +269,13 @@ pub const DeclarationCollector = struct {
         };
 
         try self.symbols.insertGlobal(const_decl.name, symbol);
+
+        try self.location_table.addDefinition(
+            const_decl.name,
+            const_decl.name_loc.line,
+            const_decl.name_loc.column,
+            const_decl.name.len,
+        );
     }
 };
 

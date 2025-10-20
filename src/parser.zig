@@ -37,12 +37,20 @@ pub const Parser = struct {
 
         // parse imports
         while (self.check(.import_kw)) {
-            try imports.append(self.allocator, try self.importDeclaration());
+            const import_decl = try self.importDeclaration();
+            imports.append(self.allocator, import_decl) catch |err| {
+                import_decl.deinit(self.allocator);
+                return err;
+            };
         }
 
         // parse top-level declarations
         while (!self.isAtEnd()) {
-            try statements.append(self.allocator, try self.declaration());
+            const decl = try self.declaration();
+            statements.append(self.allocator, decl) catch |err| {
+                ast.deinitStmt(&decl, self.allocator);
+                return err;
+            };
         }
 
         return ast.Module{
@@ -145,6 +153,8 @@ pub const Parser = struct {
         _ = try self.consume(.lparen, "expected '(' after function name");
 
         var params: std.ArrayList(ast.Param) = .empty;
+        errdefer params.deinit(self.allocator);
+
         if (!self.check(.rparen)) {
             while (true) {
                 var is_capability = false;
@@ -162,12 +172,15 @@ pub const Parser = struct {
                 _ = try self.consume(.colon, "expected ':' after parameter name");
                 const param_type = try self.parseType();
 
-                try params.append(self.allocator, ast.Param{
+                params.append(self.allocator, ast.Param{
                     .name = param_name.lexeme,
                     .type_annotation = param_type,
                     .is_inout = is_inout,
                     .is_capability = is_capability,
-                });
+                    .name_loc = .{ .line = param_name.line, .column = param_name.column },
+                }) catch |err| {
+                    return err;
+                };
 
                 if (!self.match(.comma)) break;
             }
@@ -185,12 +198,16 @@ pub const Parser = struct {
         }
 
         var effects: std.ArrayList([]const u8) = .empty;
+        errdefer effects.deinit(self.allocator);
+
         if (self.match(.effects_kw)) {
             _ = try self.consume(.lbracket, "expected '[' after 'effects'");
             if (!self.check(.rbracket)) {
                 while (true) {
                     const effect = try self.consume(.identifier, "expected effect name");
-                    try effects.append(self.allocator, effect.lexeme);
+                    effects.append(self.allocator, effect.lexeme) catch |err| {
+                        return err;
+                    };
                     if (!self.match(.comma)) break;
                 }
             }
@@ -208,6 +225,7 @@ pub const Parser = struct {
                 .error_domain = error_domain,
                 .effects = try effects.toOwnedSlice(self.allocator),
                 .body = body,
+                .name_loc = .{ .line = name.line, .column = name.column },
             },
         };
     }
@@ -222,6 +240,7 @@ pub const Parser = struct {
             .type_decl = ast.TypeDecl{
                 .name = name.lexeme,
                 .type_expr = type_expr,
+                .name_loc = .{ .line = name.line, .column = name.column },
             },
         };
     }
@@ -266,6 +285,7 @@ pub const Parser = struct {
             .domain_decl = ast.DomainDecl{
                 .name = name.lexeme,
                 .variants = try variants.toOwnedSlice(self.allocator),
+                .name_loc = .{ .line = name.line, .column = name.column },
             },
         };
     }
@@ -319,6 +339,7 @@ pub const Parser = struct {
                 .name = name.lexeme,
                 .type_annotation = type_annotation,
                 .value = value,
+                .name_loc = .{ .line = name.line, .column = name.column },
             },
         };
     }
@@ -340,6 +361,7 @@ pub const Parser = struct {
                 .name = name.lexeme,
                 .type_annotation = type_annotation,
                 .value = value,
+                .name_loc = .{ .line = name.line, .column = name.column },
             },
         };
     }
@@ -473,9 +495,19 @@ pub const Parser = struct {
 
     fn block(self: *Parser) ParseError![]ast.Stmt {
         var statements: std.ArrayList(ast.Stmt) = .empty;
+        errdefer {
+            for (statements.items) |*stmt| {
+                ast.deinitStmt(stmt, self.allocator);
+            }
+            statements.deinit(self.allocator);
+        }
 
         while (!self.check(.rbrace) and !self.isAtEnd()) {
-            try statements.append(self.allocator, try self.declaration());
+            const decl = try self.declaration();
+            statements.append(self.allocator, decl) catch |err| {
+                ast.deinitStmt(&decl, self.allocator);
+                return err;
+            };
         }
 
         _ = try self.consume(.rbrace, "expected '}' after block");
@@ -491,8 +523,15 @@ pub const Parser = struct {
         var expr = try self.logicalAnd();
 
         while (self.match(.pipe_pipe)) {
-            const right = try self.logicalAnd();
-            const binary_expr = try self.allocator.create(ast.Expr);
+            const right = self.logicalAnd() catch |err| {
+                ast.deinitExpr(expr, self.allocator);
+                return err;
+            };
+            const binary_expr = self.allocator.create(ast.Expr) catch |err| {
+                ast.deinitExpr(expr, self.allocator);
+                ast.deinitExpr(right, self.allocator);
+                return err;
+            };
             binary_expr.* = ast.Expr{
                 .binary = ast.BinaryExpr{
                     .left = expr,
@@ -510,8 +549,15 @@ pub const Parser = struct {
         var expr = try self.equality();
 
         while (self.match(.ampersand_ampersand)) {
-            const right = try self.equality();
-            const binary_expr = try self.allocator.create(ast.Expr);
+            const right = self.equality() catch |err| {
+                ast.deinitExpr(expr, self.allocator);
+                return err;
+            };
+            const binary_expr = self.allocator.create(ast.Expr) catch |err| {
+                ast.deinitExpr(expr, self.allocator);
+                ast.deinitExpr(right, self.allocator);
+                return err;
+            };
             binary_expr.* = ast.Expr{
                 .binary = ast.BinaryExpr{
                     .left = expr,
@@ -538,8 +584,15 @@ pub const Parser = struct {
 
             if (op == null) break;
 
-            const right = try self.comparison();
-            const binary_expr = try self.allocator.create(ast.Expr);
+            const right = self.comparison() catch |err| {
+                ast.deinitExpr(expr, self.allocator);
+                return err;
+            };
+            const binary_expr = self.allocator.create(ast.Expr) catch |err| {
+                ast.deinitExpr(expr, self.allocator);
+                ast.deinitExpr(right, self.allocator);
+                return err;
+            };
             binary_expr.* = ast.Expr{
                 .binary = ast.BinaryExpr{
                     .left = expr,
@@ -570,8 +623,15 @@ pub const Parser = struct {
 
             if (op == null) break;
 
-            const right = try self.bitwiseOr();
-            const binary_expr = try self.allocator.create(ast.Expr);
+            const right = self.bitwiseOr() catch |err| {
+                ast.deinitExpr(expr, self.allocator);
+                return err;
+            };
+            const binary_expr = self.allocator.create(ast.Expr) catch |err| {
+                ast.deinitExpr(expr, self.allocator);
+                ast.deinitExpr(right, self.allocator);
+                return err;
+            };
             binary_expr.* = ast.Expr{
                 .binary = ast.BinaryExpr{
                     .left = expr,
@@ -589,8 +649,15 @@ pub const Parser = struct {
         var expr = try self.bitwiseXor();
 
         while (self.match(.pipe)) {
-            const right = try self.bitwiseXor();
-            const binary_expr = try self.allocator.create(ast.Expr);
+            const right = self.bitwiseXor() catch |err| {
+                ast.deinitExpr(expr, self.allocator);
+                return err;
+            };
+            const binary_expr = self.allocator.create(ast.Expr) catch |err| {
+                ast.deinitExpr(expr, self.allocator);
+                ast.deinitExpr(right, self.allocator);
+                return err;
+            };
             binary_expr.* = ast.Expr{
                 .binary = ast.BinaryExpr{
                     .left = expr,
@@ -608,8 +675,15 @@ pub const Parser = struct {
         var expr = try self.bitwiseAnd();
 
         while (self.match(.caret)) {
-            const right = try self.bitwiseAnd();
-            const binary_expr = try self.allocator.create(ast.Expr);
+            const right = self.bitwiseAnd() catch |err| {
+                ast.deinitExpr(expr, self.allocator);
+                return err;
+            };
+            const binary_expr = self.allocator.create(ast.Expr) catch |err| {
+                ast.deinitExpr(expr, self.allocator);
+                ast.deinitExpr(right, self.allocator);
+                return err;
+            };
             binary_expr.* = ast.Expr{
                 .binary = ast.BinaryExpr{
                     .left = expr,
@@ -627,8 +701,15 @@ pub const Parser = struct {
         var expr = try self.shift();
 
         while (self.match(.ampersand)) {
-            const right = try self.shift();
-            const binary_expr = try self.allocator.create(ast.Expr);
+            const right = self.shift() catch |err| {
+                ast.deinitExpr(expr, self.allocator);
+                return err;
+            };
+            const binary_expr = self.allocator.create(ast.Expr) catch |err| {
+                ast.deinitExpr(expr, self.allocator);
+                ast.deinitExpr(right, self.allocator);
+                return err;
+            };
             binary_expr.* = ast.Expr{
                 .binary = ast.BinaryExpr{
                     .left = expr,
@@ -655,8 +736,15 @@ pub const Parser = struct {
 
             if (op == null) break;
 
-            const right = try self.term();
-            const binary_expr = try self.allocator.create(ast.Expr);
+            const right = self.term() catch |err| {
+                ast.deinitExpr(expr, self.allocator);
+                return err;
+            };
+            const binary_expr = self.allocator.create(ast.Expr) catch |err| {
+                ast.deinitExpr(expr, self.allocator);
+                ast.deinitExpr(right, self.allocator);
+                return err;
+            };
             binary_expr.* = ast.Expr{
                 .binary = ast.BinaryExpr{
                     .left = expr,
@@ -683,8 +771,15 @@ pub const Parser = struct {
 
             if (op == null) break;
 
-            const right = try self.factor();
-            const binary_expr = try self.allocator.create(ast.Expr);
+            const right = self.factor() catch |err| {
+                ast.deinitExpr(expr, self.allocator);
+                return err;
+            };
+            const binary_expr = self.allocator.create(ast.Expr) catch |err| {
+                ast.deinitExpr(expr, self.allocator);
+                ast.deinitExpr(right, self.allocator);
+                return err;
+            };
             binary_expr.* = ast.Expr{
                 .binary = ast.BinaryExpr{
                     .left = expr,
@@ -713,8 +808,15 @@ pub const Parser = struct {
 
             if (op == null) break;
 
-            const right = try self.unary();
-            const binary_expr = try self.allocator.create(ast.Expr);
+            const right = self.unary() catch |err| {
+                ast.deinitExpr(expr, self.allocator);
+                return err;
+            };
+            const binary_expr = self.allocator.create(ast.Expr) catch |err| {
+                ast.deinitExpr(expr, self.allocator);
+                ast.deinitExpr(right, self.allocator);
+                return err;
+            };
             binary_expr.* = ast.Expr{
                 .binary = ast.BinaryExpr{
                     .left = expr,
@@ -793,27 +895,60 @@ pub const Parser = struct {
         while (true) {
             if (self.match(.lparen)) {
                 var args: std.ArrayList(*ast.Expr) = .empty;
+                errdefer {
+                    for (args.items) |arg| {
+                        ast.deinitExpr(arg, self.allocator);
+                    }
+                    args.deinit(self.allocator);
+                }
 
                 if (!self.check(.rparen)) {
                     while (true) {
-                        try args.append(self.allocator, try self.expression());
+                        const arg = self.expression() catch |err| {
+                            ast.deinitExpr(expr, self.allocator);
+                            return err;
+                        };
+                        args.append(self.allocator, arg) catch |err| {
+                            ast.deinitExpr(arg, self.allocator);
+                            ast.deinitExpr(expr, self.allocator);
+                            return err;
+                        };
                         if (!self.match(.comma)) break;
                     }
                 }
 
-                _ = try self.consume(.rparen, "expected ')' after arguments");
+                _ = self.consume(.rparen, "expected ')' after arguments") catch |err| {
+                    ast.deinitExpr(expr, self.allocator);
+                    return err;
+                };
 
-                const call_expr = try self.allocator.create(ast.Expr);
+                const call_expr = self.allocator.create(ast.Expr) catch |err| {
+                    ast.deinitExpr(expr, self.allocator);
+                    return err;
+                };
+
+                const args_slice = args.toOwnedSlice(self.allocator) catch |err| {
+                    self.allocator.destroy(call_expr);
+                    ast.deinitExpr(expr, self.allocator);
+                    return err;
+                };
+
                 call_expr.* = ast.Expr{
                     .call = ast.CallExpr{
                         .callee = expr,
-                        .args = try args.toOwnedSlice(self.allocator),
+                        .args = args_slice,
                     },
                 };
                 expr = call_expr;
             } else if (self.match(.dot)) {
-                const field = try self.consume(.identifier, "expected field name after '.'");
-                const field_expr = try self.allocator.create(ast.Expr);
+                const field = self.consume(.identifier, "expected field name after '.'") catch |err| {
+                    ast.deinitExpr(expr, self.allocator);
+                    return err;
+                };
+                const field_expr = self.allocator.create(ast.Expr) catch |err| {
+                    ast.deinitExpr(expr, self.allocator);
+                    return err;
+                };
                 field_expr.* = ast.Expr{
                     .field_access = ast.FieldAccessExpr{
                         .object = expr,
@@ -872,7 +1007,10 @@ pub const Parser = struct {
         if (self.match(.identifier)) {
             const token = self.previous();
             const expr = try self.allocator.create(ast.Expr);
-            expr.* = ast.Expr{ .identifier = token.lexeme };
+            expr.* = ast.Expr{ .identifier = .{
+                .name = token.lexeme,
+                .loc = .{ .line = token.line, .column = token.column },
+            } };
             return expr;
         }
 

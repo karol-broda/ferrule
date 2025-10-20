@@ -11,7 +11,7 @@ domain IoError {
 use error ParseError;
 
 function parse_number(input: String) -> u32 error ParseError {
-  const value = 42;
+  const value: u32 = 42;
   return ok value;
 }
 

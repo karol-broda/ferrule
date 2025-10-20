@@ -5,6 +5,8 @@ const symbol_table = @import("symbol_table.zig");
 const error_domains = @import("error_domains.zig");
 const diagnostics = @import("diagnostics.zig");
 const typed_ast = @import("typed_ast.zig");
+const hover_info = @import("hover_info.zig");
+const symbol_locations = @import("symbol_locations.zig");
 
 const DeclarationCollector = @import("semantic/declaration_pass.zig").DeclarationCollector;
 const TypeResolver = @import("semantic/type_resolver.zig").TypeResolver;
@@ -20,6 +22,8 @@ pub const SemanticAnalyzer = struct {
     domains: error_domains.ErrorDomainTable,
     diagnostics_list: diagnostics.DiagnosticList,
     source_file: []const u8,
+    hover_table: hover_info.HoverInfoTable,
+    location_table: symbol_locations.SymbolLocationTable,
 
     pub fn init(allocator: std.mem.Allocator, source_file: []const u8, source_content: []const u8) SemanticAnalyzer {
         var diag_list = diagnostics.DiagnosticList.init(allocator);
@@ -30,6 +34,8 @@ pub const SemanticAnalyzer = struct {
             .domains = error_domains.ErrorDomainTable.init(allocator),
             .diagnostics_list = diag_list,
             .source_file = source_file,
+            .hover_table = hover_info.HoverInfoTable.init(allocator),
+            .location_table = symbol_locations.SymbolLocationTable.init(allocator),
         };
     }
 
@@ -37,6 +43,8 @@ pub const SemanticAnalyzer = struct {
         self.symbols.deinit();
         self.domains.deinit();
         self.diagnostics_list.deinit();
+        self.hover_table.deinit();
+        self.location_table.deinit();
     }
 
     pub fn analyze(self: *SemanticAnalyzer, module: ast.Module) !AnalysisResult {
@@ -70,6 +78,7 @@ pub const SemanticAnalyzer = struct {
             &self.domains,
             &self.diagnostics_list,
             self.source_file,
+            &self.location_table,
         );
         try collector.collect(module);
     }
@@ -117,11 +126,72 @@ pub const SemanticAnalyzer = struct {
                     };
 
                     type_def.underlying = try resolver.resolve(original_type_decl.type_expr);
+
+                    try self.hover_table.add(
+                        original_type_decl.name_loc.line,
+                        original_type_decl.name_loc.column,
+                        original_type_decl.name.len,
+                        original_type_decl.name,
+                        .type_def,
+                        type_def.underlying,
+                    );
                 },
                 else => {},
             }
 
             try self.symbols.global_scope.symbols.put(entry.key_ptr.*, symbol);
+        }
+
+        for (module.statements) |stmt| {
+            if (stmt == .domain_decl) {
+                const domain_decl = stmt.domain_decl;
+                var variant_infos = try self.allocator.alloc(hover_info.DomainVariantInfo, domain_decl.variants.len);
+                errdefer self.allocator.free(variant_infos);
+
+                // track all temp allocations for cleanup
+                var temp_field_names = std.ArrayList([][]const u8){};
+                defer {
+                    for (temp_field_names.items) |names| {
+                        self.allocator.free(names);
+                    }
+                    temp_field_names.deinit(self.allocator);
+                }
+                var temp_field_types = std.ArrayList([]types.ResolvedType){};
+                defer {
+                    for (temp_field_types.items) |type_arr| {
+                        self.allocator.free(type_arr);
+                    }
+                    temp_field_types.deinit(self.allocator);
+                }
+
+                for (domain_decl.variants, 0..) |variant, i| {
+                    const field_names = try self.allocator.alloc([]const u8, variant.fields.len);
+                    try temp_field_names.append(self.allocator, field_names);
+                    const field_types = try self.allocator.alloc(types.ResolvedType, variant.fields.len);
+                    try temp_field_types.append(self.allocator, field_types);
+
+                    for (variant.fields, 0..) |field, j| {
+                        field_names[j] = field.name;
+                        field_types[j] = try resolver.resolve(field.type_annotation);
+                    }
+
+                    variant_infos[i] = .{
+                        .name = variant.name,
+                        .field_names = field_names,
+                        .field_types = field_types,
+                    };
+                }
+
+                try self.hover_table.addDomain(
+                    domain_decl.name_loc.line,
+                    domain_decl.name_loc.column,
+                    domain_decl.name.len,
+                    domain_decl.name,
+                    variant_infos,
+                );
+
+                self.allocator.free(variant_infos);
+            }
         }
     }
 
@@ -131,6 +201,8 @@ pub const SemanticAnalyzer = struct {
             &self.symbols,
             &self.diagnostics_list,
             self.source_file,
+            &self.hover_table,
+            &self.location_table,
         );
 
         return try checker.checkModule(module);

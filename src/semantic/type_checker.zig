@@ -5,6 +5,8 @@ const symbol_table = @import("../symbol_table.zig");
 const diagnostics = @import("../diagnostics.zig");
 const typed_ast = @import("../typed_ast.zig");
 const type_resolver = @import("type_resolver.zig");
+const hover_info = @import("../hover_info.zig");
+const symbol_locations = @import("../symbol_locations.zig");
 
 pub const TypeChecker = struct {
     symbols: *symbol_table.SymbolTable,
@@ -14,12 +16,16 @@ pub const TypeChecker = struct {
     allocator: std.mem.Allocator,
     source_file: []const u8,
     type_resolver: type_resolver.TypeResolver,
+    hover_table: *hover_info.HoverInfoTable,
+    location_table: *symbol_locations.SymbolLocationTable,
 
     pub fn init(
         allocator: std.mem.Allocator,
         symbols: *symbol_table.SymbolTable,
         diagnostics_list: *diagnostics.DiagnosticList,
         source_file: []const u8,
+        hover_table: *hover_info.HoverInfoTable,
+        location_table: *symbol_locations.SymbolLocationTable,
     ) TypeChecker {
         return .{
             .symbols = symbols,
@@ -29,6 +35,8 @@ pub const TypeChecker = struct {
             .allocator = allocator,
             .source_file = source_file,
             .type_resolver = type_resolver.TypeResolver.init(allocator, symbols, diagnostics_list, source_file),
+            .hover_table = hover_table,
+            .location_table = location_table,
         };
     }
 
@@ -85,6 +93,26 @@ pub const TypeChecker = struct {
                 var func_symbol = symbol.function;
                 self.current_function = &func_symbol;
 
+                // collect parameter names for hover
+                var param_names = try self.allocator.alloc([]const u8, func.params.len);
+                defer self.allocator.free(param_names);
+                for (func.params, 0..) |param, i| {
+                    param_names[i] = param.name;
+                }
+
+                // add function hover info
+                try self.hover_table.addFunction(
+                    func.name_loc.line,
+                    func.name_loc.column,
+                    func.name.len,
+                    func.name,
+                    func_symbol.params,
+                    param_names,
+                    func_symbol.return_type,
+                    func_symbol.effects,
+                    func_symbol.error_domain,
+                );
+
                 // use already-resolved parameter types from Pass 2
                 for (func.params, func_symbol.params) |param, param_type| {
                     const param_symbol = symbol_table.Symbol{
@@ -96,6 +124,16 @@ pub const TypeChecker = struct {
                         },
                     };
                     try self.current_scope.insert(param.name, param_symbol);
+
+                    // add parameter hover info
+                    try self.hover_table.add(
+                        param.name_loc.line,
+                        param.name_loc.column,
+                        param.name.len,
+                        param.name,
+                        .parameter,
+                        param_type,
+                    );
                 }
             }
         }
@@ -110,70 +148,138 @@ pub const TypeChecker = struct {
     fn checkConstDecl(self: *TypeChecker, const_decl: ast.ConstDecl) !void {
         const value_typed = try self.checkExpr(const_decl.value);
 
+        // require explicit type annotation for numeric literals
+        if (const_decl.type_annotation == null and self.isNumericLiteral(const_decl.value)) {
+            try self.diagnostics_list.addError(
+                try std.fmt.allocPrint(
+                    self.allocator,
+                    "numeric literal requires explicit type annotation: const {s}: <type> = ...",
+                    .{const_decl.name},
+                ),
+                .{
+                    .file = self.source_file,
+                    .line = const_decl.name_loc.line,
+                    .column = const_decl.name_loc.column,
+                    .length = const_decl.name.len,
+                },
+                try self.allocator.dupe(u8, "specify the type explicitly to avoid ambiguity (e.g., u32, i32, f64)"),
+            );
+        }
+
+        var final_type = value_typed.resolved_type;
+
         if (const_decl.type_annotation) |type_annotation| {
             const declared_type = try self.type_resolver.resolve(type_annotation);
+            final_type = declared_type;
+
+            // allow numeric literals to unify with the declared type
             if (!declared_type.eql(&value_typed.resolved_type)) {
-                try self.diagnostics_list.addError(
-                    try std.fmt.allocPrint(
-                        self.allocator,
-                        "type mismatch in constant declaration: expected {any}, got {any}",
-                        .{ declared_type, value_typed.resolved_type },
-                    ),
-                    .{
-                        .file = self.source_file,
-                        .line = 0,
-                        .column = 0,
-                        .length = const_decl.name.len,
-                    },
-                    null,
-                );
+                if (!self.canUnifyNumericLiteral(const_decl.value, &value_typed.resolved_type, &declared_type)) {
+                    try self.diagnostics_list.addError(
+                        try std.fmt.allocPrint(
+                            self.allocator,
+                            "type mismatch in constant declaration: expected {any}, got {any}",
+                            .{ declared_type, value_typed.resolved_type },
+                        ),
+                        .{
+                            .file = self.source_file,
+                            .line = const_decl.name_loc.line,
+                            .column = const_decl.name_loc.column,
+                            .length = const_decl.name.len,
+                        },
+                        null,
+                    );
+                }
             }
         }
 
         const const_symbol = symbol_table.Symbol{
             .constant = .{
                 .name = const_decl.name,
-                .type_annotation = value_typed.resolved_type,
+                .type_annotation = final_type,
                 .scope_level = self.current_scope.scope_level,
             },
         };
 
         try self.current_scope.insert(const_decl.name, const_symbol);
+
+        try self.hover_table.add(
+            const_decl.name_loc.line,
+            const_decl.name_loc.column,
+            const_decl.name.len,
+            const_decl.name,
+            .constant,
+            final_type,
+        );
     }
 
     pub fn checkVarDecl(self: *TypeChecker, var_decl: ast.VarDecl) !void {
         const value_typed = try self.checkExpr(var_decl.value);
 
+        // require explicit type annotation for numeric literals
+        if (var_decl.type_annotation == null and self.isNumericLiteral(var_decl.value)) {
+            try self.diagnostics_list.addError(
+                try std.fmt.allocPrint(
+                    self.allocator,
+                    "numeric literal requires explicit type annotation: var {s}: <type> = ...",
+                    .{var_decl.name},
+                ),
+                .{
+                    .file = self.source_file,
+                    .line = var_decl.name_loc.line,
+                    .column = var_decl.name_loc.column,
+                    .length = var_decl.name.len,
+                },
+                try self.allocator.dupe(u8, "specify the type explicitly to avoid ambiguity (e.g., u32, i32, f64)"),
+            );
+        }
+
+        var final_type = value_typed.resolved_type;
+
         if (var_decl.type_annotation) |type_annotation| {
             const declared_type = try self.type_resolver.resolve(type_annotation);
+            final_type = declared_type;
+
+            // allow numeric literals to unify with the declared type
             if (!declared_type.eql(&value_typed.resolved_type)) {
-                try self.diagnostics_list.addError(
-                    try std.fmt.allocPrint(
-                        self.allocator,
-                        "type mismatch in variable declaration: expected {any}, got {any}",
-                        .{ declared_type, value_typed.resolved_type },
-                    ),
-                    .{
-                        .file = self.source_file,
-                        .line = 0,
-                        .column = 0,
-                        .length = var_decl.name.len,
-                    },
-                    null,
-                );
+                if (!self.canUnifyNumericLiteral(var_decl.value, &value_typed.resolved_type, &declared_type)) {
+                    try self.diagnostics_list.addError(
+                        try std.fmt.allocPrint(
+                            self.allocator,
+                            "type mismatch in variable declaration: expected {any}, got {any}",
+                            .{ declared_type, value_typed.resolved_type },
+                        ),
+                        .{
+                            .file = self.source_file,
+                            .line = var_decl.name_loc.line,
+                            .column = var_decl.name_loc.column,
+                            .length = var_decl.name.len,
+                        },
+                        null,
+                    );
+                }
             }
         }
 
         const var_symbol = symbol_table.Symbol{
             .variable = .{
                 .name = var_decl.name,
-                .type_annotation = value_typed.resolved_type,
+                .type_annotation = final_type,
                 .is_mutable = true,
                 .scope_level = self.current_scope.scope_level,
             },
         };
 
         try self.current_scope.insert(var_decl.name, var_symbol);
+
+        try self.hover_table.add(
+            var_decl.name_loc.line,
+            var_decl.name_loc.column,
+            var_decl.name.len,
+            var_decl.name,
+            .variable,
+            final_type,
+        );
     }
 
     pub fn checkReturnStmt(self: *TypeChecker, return_stmt: ast.ReturnStmt) !void {
@@ -228,7 +334,15 @@ pub const TypeChecker = struct {
     pub fn checkAssignStmt(self: *TypeChecker, assign: ast.AssignStmt) !void {
         const value_typed = try self.checkExpr(assign.value);
 
-        if (self.current_scope.lookup(assign.target)) |symbol| {
+        // track reference to the assignment target
+        try self.location_table.addReference(
+            assign.target.name,
+            assign.target.loc.line,
+            assign.target.loc.column,
+            assign.target.name.len,
+        );
+
+        if (self.current_scope.lookup(assign.target.name)) |symbol| {
             switch (symbol) {
                 .variable => |v| {
                     if (!v.is_mutable) {
@@ -236,13 +350,13 @@ pub const TypeChecker = struct {
                             try std.fmt.allocPrint(
                                 self.allocator,
                                 "cannot assign to immutable variable '{s}'",
-                                .{assign.target},
+                                .{assign.target.name},
                             ),
                             .{
                                 .file = self.source_file,
                                 .line = 0,
                                 .column = 0,
-                                .length = assign.target.len,
+                                .length = assign.target.name.len,
                             },
                             null,
                         );
@@ -258,7 +372,7 @@ pub const TypeChecker = struct {
                                 .file = self.source_file,
                                 .line = 0,
                                 .column = 0,
-                                .length = assign.target.len,
+                                .length = assign.target.name.len,
                             },
                             null,
                         );
@@ -269,13 +383,13 @@ pub const TypeChecker = struct {
                         try std.fmt.allocPrint(
                             self.allocator,
                             "cannot assign to '{s}': not a variable",
-                            .{assign.target},
+                            .{assign.target.name},
                         ),
                         .{
                             .file = self.source_file,
                             .line = 0,
                             .column = 0,
-                            .length = assign.target.len,
+                            .length = assign.target.name.len,
                         },
                         null,
                     );
@@ -286,13 +400,13 @@ pub const TypeChecker = struct {
                 try std.fmt.allocPrint(
                     self.allocator,
                     "undefined variable '{s}'",
-                    .{assign.target},
+                    .{assign.target.name},
                 ),
                 .{
                     .file = self.source_file,
                     .line = 0,
                     .column = 0,
-                    .length = assign.target.len,
+                    .length = assign.target.name.len,
                 },
                 null,
             );
@@ -413,13 +527,14 @@ pub const TypeChecker = struct {
         return types.ResolvedType.i32;
     }
 
-    fn checkIdentifier(self: *TypeChecker, id: []const u8) !types.ResolvedType {
+    fn checkIdentifier(self: *TypeChecker, id_expr: ast.IdentifierExpr) !types.ResolvedType {
+        const id = id_expr.name;
         if (self.current_scope.lookup(id)) |symbol| {
-            return switch (symbol) {
+            const resolved_type = switch (symbol) {
                 .variable => |v| v.type_annotation,
                 .constant => |c| c.type_annotation,
                 .parameter => |p| p.type_annotation,
-                .function => types.ResolvedType.unit_type,
+                .function => |f| f.return_type,
                 else => {
                     try self.diagnostics_list.addError(
                         try std.fmt.allocPrint(
@@ -438,6 +553,33 @@ pub const TypeChecker = struct {
                     return types.ResolvedType.unit_type;
                 },
             };
+
+            // add hover info and track reference
+            const kind: hover_info.HoverKind = switch (symbol) {
+                .variable => .variable,
+                .constant => .constant,
+                .parameter => .parameter,
+                .function => .function,
+                else => .variable,
+            };
+
+            try self.hover_table.add(
+                id_expr.loc.line,
+                id_expr.loc.column,
+                id.len,
+                id,
+                kind,
+                resolved_type,
+            );
+
+            try self.location_table.addReference(
+                id,
+                id_expr.loc.line,
+                id_expr.loc.column,
+                id.len,
+            );
+
+            return resolved_type;
         }
 
         try self.diagnostics_list.addError(
@@ -526,7 +668,7 @@ pub const TypeChecker = struct {
 
     fn checkCall(self: *TypeChecker, call: ast.CallExpr) !types.ResolvedType {
         if (call.callee.* == .identifier) {
-            const func_name = call.callee.identifier;
+            const func_name = call.callee.identifier.name;
             if (self.symbols.lookupGlobal(func_name)) |symbol| {
                 if (symbol == .function) {
                     const func = symbol.function;
@@ -642,6 +784,28 @@ pub const TypeChecker = struct {
         }
 
         return result_type orelse types.ResolvedType.unit_type;
+    }
+
+    fn isNumericLiteral(self: *TypeChecker, expr: *ast.Expr) bool {
+        _ = self;
+        return expr.* == .number;
+    }
+
+    fn canUnifyNumericLiteral(self: *TypeChecker, expr: *ast.Expr, inferred: *const types.ResolvedType, declared: *const types.ResolvedType) bool {
+        // if the expression is a numeric literal, allow it to unify with any numeric type
+        if (expr.* == .number) {
+            return self.isNumericType(inferred) and self.isNumericType(declared);
+        }
+
+        return false;
+    }
+
+    fn isNumericType(self: *TypeChecker, t: *const types.ResolvedType) bool {
+        _ = self;
+        return switch (t.*) {
+            .i8, .i16, .i32, .i64, .i128, .u8, .u16, .u32, .u64, .u128, .usize_type, .f16, .f32, .f64 => true,
+            else => false,
+        };
     }
 };
 

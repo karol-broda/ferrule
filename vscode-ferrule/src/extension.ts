@@ -38,9 +38,15 @@ export function activate(context: ExtensionContext) {
         }
     }
 
+    const debugMode = config.get<boolean>('debugMode', false);
+    const env = debugMode ? { FERRULE_LSP_DEBUG: '1' } : {};
+
     const serverOptions: ServerOptions = {
         command: serverPath,
         transport: TransportKind.stdio,
+        options: {
+            env: { ...process.env, ...env }
+        }
     };
 
     const clientOptions: LanguageClientOptions = {

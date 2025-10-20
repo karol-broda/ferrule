@@ -29,10 +29,11 @@ test "collect simple function declaration" {
     const func_decl = ast.FunctionDecl{
         .name = "test_func",
         .params = &[_]ast.Param{},
-        .return_type = .{ .simple = "()" },
+        .return_type = .{ .simple = .{ .name = "()", .loc = .{ .line = 1, .column = 1 } } },
         .error_domain = null,
         .effects = &[_][]const u8{},
         .body = &[_]ast.Stmt{},
+        .name_loc = .{ .line = 1, .column = 1 },
     };
 
     try collector.collectFunction(func_decl);
@@ -66,10 +67,11 @@ test "detect duplicate function declaration" {
     const func_decl = ast.FunctionDecl{
         .name = "duplicate",
         .params = &[_]ast.Param{},
-        .return_type = .{ .simple = "()" },
+        .return_type = .{ .simple = .{ .name = "()", .loc = .{ .line = 1, .column = 1 } } },
         .error_domain = null,
         .effects = &[_][]const u8{},
         .body = &[_]ast.Stmt{},
+        .name_loc = .{ .line = 1, .column = 1 },
     };
 
     try collector.collectFunction(func_decl);
@@ -102,10 +104,11 @@ test "collect function with effects" {
     const func_decl = ast.FunctionDecl{
         .name = "io_func",
         .params = &[_]ast.Param{},
-        .return_type = .{ .simple = "()" },
+        .return_type = .{ .simple = .{ .name = "()", .loc = .{ .line = 1, .column = 1 } } },
         .error_domain = null,
         .effects = io_effect[0..],
         .body = &[_]ast.Stmt{},
+        .name_loc = .{ .line = 1, .column = 1 },
     };
 
     try collector.collectFunction(func_decl);
@@ -142,10 +145,11 @@ test "collect unknown effect results in error" {
     const func_decl = ast.FunctionDecl{
         .name = "bad_effect",
         .params = &[_]ast.Param{},
-        .return_type = .{ .simple = "()" },
+        .return_type = .{ .simple = .{ .name = "()", .loc = .{ .line = 1, .column = 1 } } },
         .error_domain = null,
         .effects = unknown_effect[0..],
         .body = &[_]ast.Stmt{},
+        .name_loc = .{ .line = 1, .column = 1 },
     };
 
     try collector.collectFunction(func_decl);
@@ -175,7 +179,8 @@ test "collect type declaration" {
 
     const type_decl = ast.TypeDecl{
         .name = "MyType",
-        .type_expr = .{ .simple = "i32" },
+        .type_expr = .{ .simple = .{ .name = "i32", .loc = .{ .line = 1, .column = 1 } } },
+        .name_loc = .{ .line = 1, .column = 1 },
     };
 
     try collector.collectTypeDecl(type_decl);
@@ -208,7 +213,8 @@ test "detect duplicate type declaration" {
 
     const type_decl = ast.TypeDecl{
         .name = "DupType",
-        .type_expr = .{ .simple = "i32" },
+        .type_expr = .{ .simple = .{ .name = "i32", .loc = .{ .line = 1, .column = 1 } } },
+        .name_loc = .{ .line = 1, .column = 1 },
     };
 
     try collector.collectTypeDecl(type_decl);
@@ -244,6 +250,7 @@ test "collect domain declaration" {
     const domain_decl = ast.DomainDecl{
         .name = "FileError",
         .variants = variants[0..],
+        .name_loc = .{ .line = 1, .column = 1 },
     };
 
     try collector.collectDomain(domain_decl);
@@ -280,6 +287,7 @@ test "detect duplicate domain declaration" {
     const domain_decl = ast.DomainDecl{
         .name = "DupDomain",
         .variants = &[_]ast.DomainVariant{},
+        .name_loc = .{ .line = 1, .column = 1 },
     };
 
     try collector.collectDomain(domain_decl);
@@ -344,6 +352,7 @@ test "collect const declaration" {
         .name = "MY_CONST",
         .type_annotation = null,
         .value = &value_expr,
+        .name_loc = .{ .line = 1, .column = 1 },
     };
 
     try collector.collectConst(const_decl);
