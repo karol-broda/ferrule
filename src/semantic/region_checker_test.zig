@@ -266,6 +266,7 @@ test "for loop should check region disposal" {
     };
     const for_stmt = ast.ForStmt{
         .iterator = "item",
+        .iterator_loc = .{ .line = 1, .column = 1 },
         .iterable = &iterable,
         .body = body4[0..],
     };

@@ -51,6 +51,122 @@ pub const ResolvedType = union(enum) {
         error_domain: []const u8,
     },
 
+    pub fn clone(self: ResolvedType, allocator: std.mem.Allocator) std.mem.Allocator.Error!ResolvedType {
+        return switch (self) {
+            .i8, .i16, .i32, .i64, .i128, .u8, .u16, .u32, .u64, .u128, .usize_type, .f16, .f32, .f64, .bool_type, .char_type, .string_type, .bytes_type, .unit_type => self,
+            .array => |a| {
+                const elem_ptr = try allocator.create(ResolvedType);
+                elem_ptr.* = try a.element_type.clone(allocator);
+                return ResolvedType{ .array = .{
+                    .element_type = elem_ptr,
+                    .size = a.size,
+                } };
+            },
+            .vector => |v| {
+                const elem_ptr = try allocator.create(ResolvedType);
+                elem_ptr.* = try v.element_type.clone(allocator);
+                return ResolvedType{ .vector = .{
+                    .element_type = elem_ptr,
+                    .size = v.size,
+                } };
+            },
+            .view => |v| {
+                const elem_ptr = try allocator.create(ResolvedType);
+                elem_ptr.* = try v.element_type.clone(allocator);
+                return ResolvedType{ .view = .{
+                    .element_type = elem_ptr,
+                    .mutable = v.mutable,
+                } };
+            },
+            .nullable => |n| {
+                const inner_ptr = try allocator.create(ResolvedType);
+                inner_ptr.* = try n.clone(allocator);
+                return ResolvedType{ .nullable = inner_ptr };
+            },
+            .function_type => |f| {
+                const params_copy = try allocator.alloc(ResolvedType, f.params.len);
+                for (f.params, 0..) |param, i| {
+                    params_copy[i] = try param.clone(allocator);
+                }
+                const ret_ptr = try allocator.create(ResolvedType);
+                ret_ptr.* = try f.return_type.clone(allocator);
+                const effects_copy = try allocator.dupe(Effect, f.effects);
+                const domain_copy = if (f.error_domain) |domain|
+                    try allocator.dupe(u8, domain)
+                else
+                    null;
+                return ResolvedType{ .function_type = .{
+                    .params = params_copy,
+                    .return_type = ret_ptr,
+                    .effects = effects_copy,
+                    .error_domain = domain_copy,
+                } };
+            },
+            .named => |n| {
+                const under_ptr = try allocator.create(ResolvedType);
+                under_ptr.* = try n.underlying.clone(allocator);
+                const name_copy = try allocator.dupe(u8, n.name);
+                return ResolvedType{ .named = .{
+                    .name = name_copy,
+                    .underlying = under_ptr,
+                } };
+            },
+            .result => |r| {
+                const ok_ptr = try allocator.create(ResolvedType);
+                ok_ptr.* = try r.ok_type.clone(allocator);
+                const domain_copy = try allocator.dupe(u8, r.error_domain);
+                return ResolvedType{ .result = .{
+                    .ok_type = ok_ptr,
+                    .error_domain = domain_copy,
+                } };
+            },
+        };
+    }
+
+    pub fn deinit(self: *const ResolvedType, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .i8, .i16, .i32, .i64, .i128, .u8, .u16, .u32, .u64, .u128, .usize_type, .f16, .f32, .f64, .bool_type, .char_type, .string_type, .bytes_type, .unit_type => {},
+            .array => |a| {
+                a.element_type.deinit(allocator);
+                allocator.destroy(a.element_type);
+            },
+            .vector => |v| {
+                v.element_type.deinit(allocator);
+                allocator.destroy(v.element_type);
+            },
+            .view => |v| {
+                v.element_type.deinit(allocator);
+                allocator.destroy(v.element_type);
+            },
+            .nullable => |n| {
+                n.deinit(allocator);
+                allocator.destroy(n);
+            },
+            .function_type => |f| {
+                for (f.params) |*param| {
+                    param.deinit(allocator);
+                }
+                allocator.free(f.params);
+                f.return_type.deinit(allocator);
+                allocator.destroy(f.return_type);
+                allocator.free(f.effects);
+                if (f.error_domain) |domain| {
+                    allocator.free(domain);
+                }
+            },
+            .named => |n| {
+                n.underlying.deinit(allocator);
+                allocator.destroy(n.underlying);
+                allocator.free(n.name);
+            },
+            .result => |r| {
+                r.ok_type.deinit(allocator);
+                allocator.destroy(r.ok_type);
+                allocator.free(r.error_domain);
+            },
+        }
+    }
+
     pub fn eql(self: *const ResolvedType, other: *const ResolvedType) bool {
         if (std.meta.activeTag(self.*) != std.meta.activeTag(other.*)) {
             return false;
@@ -125,65 +241,57 @@ pub const ResolvedType = union(enum) {
             .string_type => try writer.writeAll("String"),
             .bytes_type => try writer.writeAll("Bytes"),
             .unit_type => try writer.writeAll("()"),
-            .array => |a| try writer.print("[{d}]{any}", .{ a.size, a.element_type.* }),
-            .vector => |v| try writer.print("<{d}>{any}", .{ v.size, v.element_type.* }),
-            .view => |v| {
-                if (v.mutable) {
-                    try writer.print("&mut {any}", .{v.element_type.*});
+            .array => |a| {
+                if (a.size == 0) {
+                    // dynamic sized array - display as Array<T>
+                    try writer.writeAll("Array<");
+                    try a.element_type.format("", .{}, writer);
+                    try writer.writeAll(">");
                 } else {
-                    try writer.print("&{any}", .{v.element_type.*});
+                    // fixed size array
+                    try writer.writeAll("Array<");
+                    try a.element_type.format("", .{}, writer);
+                    try writer.print(", {d}>", .{a.size});
                 }
             },
-            .nullable => |n| try writer.print("?{any}", .{n.*}),
+            .vector => |v| {
+                if (v.size == 0) {
+                    try writer.writeAll("Vector<");
+                    try v.element_type.format("", .{}, writer);
+                    try writer.writeAll(">");
+                } else {
+                    try writer.writeAll("Vector<");
+                    try v.element_type.format("", .{}, writer);
+                    try writer.print(", {d}>", .{v.size});
+                }
+            },
+            .view => |v| {
+                try writer.writeAll("View<");
+                if (v.mutable) {
+                    try writer.writeAll("mut ");
+                }
+                try v.element_type.format("", .{}, writer);
+                try writer.writeAll(">");
+            },
+            .nullable => |n| {
+                try n.format("", .{}, writer);
+                try writer.writeAll("?");
+            },
             .function_type => |f| {
                 try writer.writeAll("(");
                 for (f.params, 0..) |p, i| {
                     if (i > 0) try writer.writeAll(", ");
-                    try writer.print("{any}", .{p});
+                    try p.format("", .{}, writer);
                 }
-                try writer.print(") -> {any}", .{f.return_type.*});
+                try writer.writeAll(") -> ");
+                try f.return_type.format("", .{}, writer);
             },
             .named => |n| try writer.writeAll(n.name),
-            .result => |r| try writer.print("Result<{any}, {s}>", .{ r.ok_type.*, r.error_domain }),
-        }
-    }
-
-    pub fn deinit(self: *const ResolvedType, allocator: std.mem.Allocator) void {
-        switch (self.*) {
-            .array => |a| {
-                a.element_type.deinit(allocator);
-                allocator.destroy(a.element_type);
-            },
-            .vector => |v| {
-                v.element_type.deinit(allocator);
-                allocator.destroy(v.element_type);
-            },
-            .view => |v| {
-                v.element_type.deinit(allocator);
-                allocator.destroy(v.element_type);
-            },
-            .nullable => |n| {
-                n.deinit(allocator);
-                allocator.destroy(n);
-            },
-            .function_type => |f| {
-                for (f.params) |*p| {
-                    p.deinit(allocator);
-                }
-                allocator.free(f.params);
-                f.return_type.deinit(allocator);
-                allocator.destroy(f.return_type);
-                allocator.free(f.effects);
-            },
-            .named => |n| {
-                n.underlying.deinit(allocator);
-                allocator.destroy(n.underlying);
-            },
             .result => |r| {
-                r.ok_type.deinit(allocator);
-                allocator.destroy(r.ok_type);
+                try writer.writeAll("Result<");
+                try r.ok_type.format("", .{}, writer);
+                try writer.print(", {s}>", .{r.error_domain});
             },
-            else => {},
         }
     }
 };

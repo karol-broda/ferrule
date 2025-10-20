@@ -64,15 +64,25 @@ pub const HoverInfoTable = struct {
     }
 
     pub fn deinit(self: *HoverInfoTable) void {
-        // free all copied strings
+        // free all copied strings and cloned types
         for (self.infos.items) |info| {
             self.allocator.free(info.name);
+
+            // deinit the resolved type
+            info.resolved_type.deinit(self.allocator);
 
             if (info.function_info) |func_info| {
                 for (func_info.param_names) |param_name| {
                     self.allocator.free(param_name);
                 }
                 self.allocator.free(func_info.param_names);
+
+                // deinit cloned param types
+                for (func_info.params) |*param| {
+                    param.deinit(self.allocator);
+                }
+                self.allocator.free(func_info.params);
+
                 self.allocator.free(func_info.effects);
                 if (func_info.error_domain) |domain| {
                     self.allocator.free(domain);
@@ -86,6 +96,10 @@ pub const HoverInfoTable = struct {
                         self.allocator.free(field_name);
                     }
                     self.allocator.free(variant.field_names);
+                    for (variant.field_types) |*field_type| {
+                        field_type.deinit(self.allocator);
+                    }
+                    self.allocator.free(variant.field_types);
                 }
                 self.allocator.free(domain_info.variants);
             }
@@ -98,13 +112,16 @@ pub const HoverInfoTable = struct {
         // copy name to ensure it survives after AST is destroyed
         const name_copy = try self.allocator.dupe(u8, name);
 
+        // clone the type to ensure it survives after AST is destroyed
+        const type_copy = try resolved_type.clone(self.allocator);
+
         try self.infos.append(self.allocator, .{
             .line = line,
             .column = column,
             .length = length,
             .name = name_copy,
             .kind = kind,
-            .resolved_type = resolved_type,
+            .resolved_type = type_copy,
             .function_info = null,
             .domain_info = null,
         });
@@ -116,6 +133,15 @@ pub const HoverInfoTable = struct {
         for (param_names, 0..) |param_name, i| {
             param_names_copy[i] = try self.allocator.dupe(u8, param_name);
         }
+
+        // deep copy params array to ensure types survive after AST is destroyed
+        const params_copy = try self.allocator.alloc(types.ResolvedType, params.len);
+        for (params, 0..) |param, i| {
+            params_copy[i] = try param.clone(self.allocator);
+        }
+
+        // deep copy return type
+        const return_type_copy = try return_type.clone(self.allocator);
 
         // deep copy effects array
         const effects_copy = try self.allocator.dupe(types.Effect, effects);
@@ -135,11 +161,11 @@ pub const HoverInfoTable = struct {
             .length = length,
             .name = name_copy,
             .kind = .function,
-            .resolved_type = return_type,
+            .resolved_type = return_type_copy,
             .function_info = .{
-                .params = params,
+                .params = params_copy,
                 .param_names = param_names_copy,
-                .return_type = return_type,
+                .return_type = return_type_copy,
                 .effects = effects_copy,
                 .error_domain = error_domain_copy,
             },
@@ -161,10 +187,16 @@ pub const HoverInfoTable = struct {
                 field_names_copy[j] = try self.allocator.dupe(u8, field_name);
             }
 
+            // clone field types to ensure they survive after AST is destroyed
+            const field_types_copy = try self.allocator.alloc(types.ResolvedType, variant.field_types.len);
+            for (variant.field_types, 0..) |field_type, j| {
+                field_types_copy[j] = try field_type.clone(self.allocator);
+            }
+
             variants_copy[i] = .{
                 .name = variant_name_copy,
                 .field_names = field_names_copy,
-                .field_types = variant.field_types,
+                .field_types = field_types_copy,
             };
         }
 

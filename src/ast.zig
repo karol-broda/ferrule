@@ -10,6 +10,11 @@ pub const Type = union(enum) {
         name: []const u8,
         loc: Location,
     },
+    generic: struct {
+        name: []const u8,
+        type_args: []Type,
+        loc: Location,
+    },
     array: struct {
         element_type: *Type,
         size: *Expr,
@@ -141,6 +146,7 @@ pub const WhileStmt = struct {
 
 pub const ForStmt = struct {
     iterator: []const u8,
+    iterator_loc: Location,
     iterable: *Expr,
     body: []Stmt,
 };
@@ -448,9 +454,15 @@ pub fn deinitExpr(expr: *const Expr, allocator: std.mem.Allocator) void {
     allocator.destroy(expr);
 }
 
-fn deinitType(type_expr: *const Type, allocator: std.mem.Allocator) void {
+pub fn deinitType(type_expr: *const Type, allocator: std.mem.Allocator) void {
     switch (type_expr.*) {
         .simple => {},
+        .generic => |gen| {
+            for (gen.type_args) |*arg| {
+                deinitType(arg, allocator);
+            }
+            allocator.free(gen.type_args);
+        },
         .array => |arr| {
             deinitType(arr.element_type, allocator);
             allocator.destroy(arr.element_type);
@@ -470,8 +482,8 @@ fn deinitType(type_expr: *const Type, allocator: std.mem.Allocator) void {
             allocator.destroy(nullable.inner);
         },
         .function_type => |ft| {
-            for (ft.params) |param| {
-                deinitType(&param, allocator);
+            for (ft.params) |*param| {
+                deinitType(param, allocator);
             }
             allocator.free(ft.params);
             deinitType(ft.return_type, allocator);

@@ -129,9 +129,29 @@ pub const SymbolTable = struct {
         while (iter.next()) |entry| {
             switch (entry.value_ptr.*) {
                 .function => |f| {
+                    // deinit each parameter type before freeing the array
+                    for (f.params) |*param| {
+                        param.deinit(self.allocator);
+                    }
                     self.allocator.free(f.params);
+                    
+                    // deinit return type
+                    f.return_type.deinit(self.allocator);
+                    
                     self.allocator.free(f.effects);
                     self.allocator.free(f.is_capability_param);
+                },
+                .type_def => |td| {
+                    td.underlying.deinit(self.allocator);
+                },
+                .variable => |v| {
+                    v.type_annotation.deinit(self.allocator);
+                },
+                .constant => |c| {
+                    c.type_annotation.deinit(self.allocator);
+                },
+                .parameter => |p| {
+                    p.type_annotation.deinit(self.allocator);
                 },
                 else => {},
             }

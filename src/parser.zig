@@ -30,6 +30,20 @@ pub const Parser = struct {
         var imports: std.ArrayList(ast.ImportDecl) = .empty;
         var statements: std.ArrayList(ast.Stmt) = .empty;
 
+        errdefer {
+            if (package_decl) |pd| {
+                self.allocator.free(pd.name);
+            }
+            for (imports.items) |import_decl| {
+                import_decl.deinit(self.allocator);
+            }
+            imports.deinit(self.allocator);
+            for (statements.items) |*stmt| {
+                ast.deinitStmt(stmt, self.allocator);
+            }
+            statements.deinit(self.allocator);
+        }
+
         // parse package declaration
         if (self.check(.package_kw)) {
             package_decl = try self.packageDeclaration();
@@ -92,6 +106,8 @@ pub const Parser = struct {
         _ = try self.consume(.lbrace, "expected '{' after import source");
 
         var items: std.ArrayList(ast.ImportItem) = .empty;
+        errdefer items.deinit(self.allocator);
+
         if (!self.check(.rbrace)) {
             while (true) {
                 const item_name = try self.consume(.identifier, "expected import item name");
@@ -102,10 +118,12 @@ pub const Parser = struct {
                     alias = alias_token.lexeme;
                 }
 
-                try items.append(self.allocator, ast.ImportItem{
+                items.append(self.allocator, ast.ImportItem{
                     .name = item_name.lexeme,
                     .alias = alias,
-                });
+                }) catch |err| {
+                    return err;
+                };
 
                 if (!self.match(.comma)) break;
             }
@@ -153,7 +171,12 @@ pub const Parser = struct {
         _ = try self.consume(.lparen, "expected '(' after function name");
 
         var params: std.ArrayList(ast.Param) = .empty;
-        errdefer params.deinit(self.allocator);
+        errdefer {
+            for (params.items) |*param| {
+                ast.deinitType(&param.type_annotation, self.allocator);
+            }
+            params.deinit(self.allocator);
+        }
 
         if (!self.check(.rparen)) {
             while (true) {
@@ -179,6 +202,7 @@ pub const Parser = struct {
                     .is_capability = is_capability,
                     .name_loc = .{ .line = param_name.line, .column = param_name.column },
                 }) catch |err| {
+                    ast.deinitType(&param_type, self.allocator);
                     return err;
                 };
 
@@ -186,10 +210,14 @@ pub const Parser = struct {
             }
         }
 
-        _ = try self.consume(.rparen, "expected ')' after parameters");
+        const rparen_result = self.consume(.rparen, "expected ')' after parameters") catch |err| {
+            return err;
+        };
+        _ = rparen_result;
         _ = try self.consume(.arrow, "expected '->' after parameters");
 
         const return_type = try self.parseType();
+        errdefer ast.deinitType(&return_type, self.allocator);
 
         var error_domain: ?[]const u8 = null;
         if (self.match(.error_kw)) {
@@ -215,7 +243,9 @@ pub const Parser = struct {
         }
 
         _ = try self.consume(.lbrace, "expected '{' before function body");
-        const body = try self.block();
+        const body = self.block() catch |err| {
+            return err;
+        };
 
         return ast.Stmt{
             .function_decl = ast.FunctionDecl{
@@ -250,11 +280,27 @@ pub const Parser = struct {
         _ = try self.consume(.lbrace, "expected '{' after domain name");
 
         var variants: std.ArrayList(ast.DomainVariant) = .empty;
+        errdefer {
+            for (variants.items) |variant| {
+                for (variant.fields) |field| {
+                    ast.deinitType(&field.type_annotation, self.allocator);
+                }
+                self.allocator.free(variant.fields);
+            }
+            variants.deinit(self.allocator);
+        }
 
         while (!self.check(.rbrace) and !self.isAtEnd()) {
             const variant_name = try self.consume(.identifier, "expected variant name");
 
             var fields: std.ArrayList(ast.Field) = .empty;
+            errdefer {
+                for (fields.items) |field| {
+                    ast.deinitType(&field.type_annotation, self.allocator);
+                }
+                fields.deinit(self.allocator);
+            }
+
             if (self.match(.lbrace)) {
                 if (!self.check(.rbrace)) {
                     while (true) {
@@ -262,10 +308,13 @@ pub const Parser = struct {
                         _ = try self.consume(.colon, "expected ':' after field name");
                         const field_type = try self.parseType();
 
-                        try fields.append(self.allocator, ast.Field{
+                        fields.append(self.allocator, ast.Field{
                             .name = field_name.lexeme,
                             .type_annotation = field_type,
-                        });
+                        }) catch |err| {
+                            ast.deinitType(&field_type, self.allocator);
+                            return err;
+                        };
 
                         if (!self.match(.comma)) break;
                     }
@@ -273,10 +322,20 @@ pub const Parser = struct {
                 _ = try self.consume(.rbrace, "expected '}' after variant fields");
             }
 
-            try variants.append(self.allocator, ast.DomainVariant{
+            const fields_slice = fields.toOwnedSlice(self.allocator) catch |err| {
+                return err;
+            };
+
+            variants.append(self.allocator, ast.DomainVariant{
                 .name = variant_name.lexeme,
-                .fields = try fields.toOwnedSlice(self.allocator),
-            });
+                .fields = fields_slice,
+            }) catch |err| {
+                for (fields_slice) |field| {
+                    ast.deinitType(&field.type_annotation, self.allocator);
+                }
+                self.allocator.free(fields_slice);
+                return err;
+            };
         }
 
         _ = try self.consume(.rbrace, "expected '}' after domain variants");
@@ -329,6 +388,11 @@ pub const Parser = struct {
         if (self.match(.colon)) {
             type_annotation = try self.parseType();
         }
+        errdefer {
+            if (type_annotation) |ta| {
+                ast.deinitType(&ta, self.allocator);
+            }
+        }
 
         _ = try self.consume(.eq, "expected '=' after constant name");
         const value = try self.expression();
@@ -350,6 +414,11 @@ pub const Parser = struct {
         var type_annotation: ?ast.Type = null;
         if (self.match(.colon)) {
             type_annotation = try self.parseType();
+        }
+        errdefer {
+            if (type_annotation) |ta| {
+                ast.deinitType(&ta, self.allocator);
+            }
         }
 
         _ = try self.consume(.eq, "expected '=' after variable name");
@@ -391,8 +460,16 @@ pub const Parser = struct {
 
     fn ifStatement(self: *Parser) ParseError!ast.Stmt {
         const condition = try self.expression();
+        errdefer ast.deinitExpr(condition, self.allocator);
+
         _ = try self.consume(.lbrace, "expected '{' after if condition");
         const then_block = try self.block();
+        errdefer {
+            for (then_block) |*stmt| {
+                ast.deinitStmt(stmt, self.allocator);
+            }
+            self.allocator.free(then_block);
+        }
 
         var else_block: ?[]ast.Stmt = null;
         if (self.match(.else_kw)) {
@@ -411,6 +488,8 @@ pub const Parser = struct {
 
     fn whileStatement(self: *Parser) ParseError!ast.Stmt {
         const condition = try self.expression();
+        errdefer ast.deinitExpr(condition, self.allocator);
+
         _ = try self.consume(.lbrace, "expected '{' after while condition");
         const body = try self.block();
 
@@ -426,12 +505,15 @@ pub const Parser = struct {
         const iterator = try self.consume(.identifier, "expected iterator name");
         _ = try self.consume(.in_kw, "expected 'in' after iterator");
         const iterable = try self.expression();
+        errdefer ast.deinitExpr(iterable, self.allocator);
+
         _ = try self.consume(.lbrace, "expected '{' after for expression");
         const body = try self.block();
 
         return ast.Stmt{
             .for_stmt = ast.ForStmt{
                 .iterator = iterator.lexeme,
+                .iterator_loc = .{ .line = iterator.line, .column = iterator.column },
                 .iterable = iterable,
                 .body = body,
             },
@@ -440,20 +522,30 @@ pub const Parser = struct {
 
     fn matchStatement(self: *Parser) ParseError!ast.Stmt {
         const value = try self.expression();
+        errdefer ast.deinitExpr(value, self.allocator);
+
         _ = try self.consume(.lbrace, "expected '{' after match value");
 
         var arms: std.ArrayList(ast.MatchArm) = .empty;
+        errdefer {
+            for (arms.items) |*arm| {
+                ast.deinitExpr(arm.body, self.allocator);
+            }
+            arms.deinit(self.allocator);
+        }
 
         while (!self.check(.rbrace) and !self.isAtEnd()) {
             const pattern = try self.parsePattern();
             _ = try self.consume(.arrow, "expected '->' after pattern");
             const body = try self.expression();
-            _ = try self.consume(.semicolon, "expected ';' after match arm");
-
-            try arms.append(self.allocator, ast.MatchArm{
+            arms.append(self.allocator, ast.MatchArm{
                 .pattern = pattern,
                 .body = body,
-            });
+            }) catch |err| {
+                ast.deinitExpr(body, self.allocator);
+                return err;
+            };
+            _ = try self.consume(.semicolon, "expected ';' after match arm");
         }
 
         _ = try self.consume(.rbrace, "expected '}' after match arms");
@@ -468,17 +560,29 @@ pub const Parser = struct {
 
     fn expressionStatement(self: *Parser) ParseError!ast.Stmt {
         const expr = try self.expression();
+        errdefer ast.deinitExpr(expr, self.allocator);
 
         // check for assignment
         if (self.match(.eq)) {
             // expr should be an identifier
             const target = switch (expr.*) {
                 .identifier => |id| id,
-                else => return ParseError.InvalidSyntax,
+                else => {
+                    ast.deinitExpr(expr, self.allocator);
+                    self.allocator.destroy(expr);
+                    return ParseError.InvalidSyntax;
+                },
             };
 
-            const value = try self.expression();
-            _ = try self.consume(.semicolon, "expected ';' after assignment");
+            const value = self.expression() catch |err| {
+                self.allocator.destroy(expr);
+                return err;
+            };
+            _ = self.consume(.semicolon, "expected ';' after assignment") catch |err| {
+                ast.deinitExpr(value, self.allocator);
+                self.allocator.destroy(expr);
+                return err;
+            };
 
             self.allocator.destroy(expr);
 
@@ -1026,7 +1130,44 @@ pub const Parser = struct {
     fn parseType(self: *Parser) ParseError!ast.Type {
         if (self.match(.identifier)) {
             const name = self.previous();
-            return ast.Type{ .simple = .{ .name = name.lexeme, .loc = .{ .line = name.line, .column = name.column } } };
+            const loc = ast.Location{ .line = name.line, .column = name.column };
+
+            // check for generic type parameters
+            if (self.match(.lt)) {
+                var type_args: std.ArrayList(ast.Type) = .empty;
+                errdefer {
+                    for (type_args.items) |*arg| {
+                        ast.deinitType(arg, self.allocator);
+                    }
+                    type_args.deinit(self.allocator);
+                }
+
+                // parse first type argument
+                const first_arg = try self.parseType();
+                type_args.append(self.allocator, first_arg) catch |err| {
+                    ast.deinitType(&first_arg, self.allocator);
+                    return err;
+                };
+
+                // parse additional type arguments
+                while (self.match(.comma)) {
+                    const arg = try self.parseType();
+                    type_args.append(self.allocator, arg) catch |err| {
+                        ast.deinitType(&arg, self.allocator);
+                        return err;
+                    };
+                }
+
+                _ = try self.consume(.gt, "expected '>' after generic type arguments");
+
+                return ast.Type{ .generic = .{
+                    .name = name.lexeme,
+                    .type_args = try type_args.toOwnedSlice(self.allocator),
+                    .loc = loc,
+                } };
+            }
+
+            return ast.Type{ .simple = .{ .name = name.lexeme, .loc = loc } };
         }
 
         return ParseError.InvalidSyntax;

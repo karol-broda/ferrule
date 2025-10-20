@@ -375,7 +375,16 @@ pub const Printer = struct {
 
     fn printType(self: *Printer, type_expr: ast.Type) !void {
         switch (type_expr) {
-            .simple => |name| try self.writer.writeAll(name),
+            .simple => |s| try self.writer.writeAll(s.name),
+            .generic => |gen| {
+                try self.writer.writeAll(gen.name);
+                try self.writer.writeAll("<");
+                for (gen.type_args, 0..) |arg, i| {
+                    if (i > 0) try self.writer.writeAll(", ");
+                    try self.printType(arg);
+                }
+                try self.writer.writeAll(">");
+            },
             .array => |arr| {
                 try self.writer.writeAll("Array<");
                 try self.printType(arr.element_type.*);

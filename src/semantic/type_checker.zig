@@ -286,7 +286,12 @@ pub const TypeChecker = struct {
         if (self.current_function) |func| {
             if (return_stmt.value) |expr| {
                 const expr_typed = try self.checkExpr(expr);
-                if (!func.return_type.eql(&expr_typed.resolved_type)) {
+
+                // allow numeric literals to unify with the expected return type
+                const types_match = func.return_type.eql(&expr_typed.resolved_type) or
+                    self.canUnifyNumericLiteral(expr, &expr_typed.resolved_type, &func.return_type);
+
+                if (!types_match) {
                     var expected_buf = std.ArrayList(u8){};
                     defer expected_buf.deinit(self.allocator);
                     try func.return_type.format("", .{}, expected_buf.writer(self.allocator));
@@ -345,6 +350,15 @@ pub const TypeChecker = struct {
         if (self.current_scope.lookup(assign.target.name)) |symbol| {
             switch (symbol) {
                 .variable => |v| {
+                    try self.hover_table.add(
+                        assign.target.loc.line,
+                        assign.target.loc.column,
+                        assign.target.name.len,
+                        assign.target.name,
+                        .variable,
+                        v.type_annotation,
+                    );
+
                     if (!v.is_mutable) {
                         try self.diagnostics_list.addError(
                             try std.fmt.allocPrint(
@@ -354,8 +368,8 @@ pub const TypeChecker = struct {
                             ),
                             .{
                                 .file = self.source_file,
-                                .line = 0,
-                                .column = 0,
+                                .line = assign.target.loc.line,
+                                .column = assign.target.loc.column,
                                 .length = assign.target.name.len,
                             },
                             null,
@@ -370,8 +384,8 @@ pub const TypeChecker = struct {
                             ),
                             .{
                                 .file = self.source_file,
-                                .line = 0,
-                                .column = 0,
+                                .line = assign.target.loc.line,
+                                .column = assign.target.loc.column,
                                 .length = assign.target.name.len,
                             },
                             null,
@@ -387,8 +401,8 @@ pub const TypeChecker = struct {
                         ),
                         .{
                             .file = self.source_file,
-                            .line = 0,
-                            .column = 0,
+                            .line = assign.target.loc.line,
+                            .column = assign.target.loc.column,
                             .length = assign.target.name.len,
                         },
                         null,
@@ -404,8 +418,8 @@ pub const TypeChecker = struct {
                 ),
                 .{
                     .file = self.source_file,
-                    .line = 0,
-                    .column = 0,
+                    .line = assign.target.loc.line,
+                    .column = assign.target.loc.column,
                     .length = assign.target.name.len,
                 },
                 null,
@@ -469,7 +483,6 @@ pub const TypeChecker = struct {
 
     fn checkForStmt(self: *TypeChecker, for_stmt: ast.ForStmt) !void {
         const iterable_typed = try self.checkExpr(for_stmt.iterable);
-        _ = iterable_typed;
 
         var new_scope = symbol_table.Scope.init(self.allocator, self.current_scope, self.current_scope.scope_level + 1);
         defer new_scope.deinit();
@@ -477,6 +490,33 @@ pub const TypeChecker = struct {
         const prev_scope = self.current_scope;
         defer self.current_scope = prev_scope;
         self.current_scope = &new_scope;
+
+        // infer iterator element type from iterable
+        const element_type = switch (iterable_typed.resolved_type) {
+            .array => |arr| arr.element_type.*,
+            .view => |view| view.element_type.*,
+            else => types.ResolvedType.unit_type,
+        };
+
+        // add iterator variable to scope
+        const iterator_symbol = symbol_table.Symbol{
+            .constant = .{
+                .name = for_stmt.iterator,
+                .type_annotation = element_type,
+                .scope_level = self.current_scope.scope_level,
+            },
+        };
+        try self.current_scope.insert(for_stmt.iterator, iterator_symbol);
+
+        // add hover info for iterator variable
+        try self.hover_table.add(
+            for_stmt.iterator_loc.line,
+            for_stmt.iterator_loc.column,
+            for_stmt.iterator.len,
+            for_stmt.iterator,
+            .constant,
+            element_type,
+        );
 
         for (for_stmt.body) |stmt| {
             _ = try self.checkStmt(stmt);
@@ -590,8 +630,8 @@ pub const TypeChecker = struct {
             ),
             .{
                 .file = self.source_file,
-                .line = 0,
-                .column = 0,
+                .line = id_expr.loc.line,
+                .column = id_expr.loc.column,
                 .length = id.len,
             },
             null,
@@ -603,8 +643,22 @@ pub const TypeChecker = struct {
         const left_typed = try self.checkExpr(binary.left);
         const right_typed = try self.checkExpr(binary.right);
 
+        // try to get location from left operand if it's an identifier
+        const loc = if (binary.left.* == .identifier)
+            binary.left.identifier.loc
+        else
+            ast.Location{ .line = 0, .column = 0 };
+
         switch (binary.op) {
             .add, .subtract, .multiply, .divide, .modulo => {
+                // unify numeric literals
+                if (self.isNumericLiteral(binary.left) and self.isNumericType(&right_typed.resolved_type)) {
+                    return right_typed.resolved_type;
+                }
+                if (self.isNumericLiteral(binary.right) and self.isNumericType(&left_typed.resolved_type)) {
+                    return left_typed.resolved_type;
+                }
+
                 if (!left_typed.resolved_type.eql(&right_typed.resolved_type)) {
                     try self.diagnostics_list.addError(
                         try std.fmt.allocPrint(
@@ -614,9 +668,9 @@ pub const TypeChecker = struct {
                         ),
                         .{
                             .file = self.source_file,
-                            .line = 0,
-                            .column = 0,
-                            .length = 0,
+                            .line = loc.line,
+                            .column = loc.column,
+                            .length = 1,
                         },
                         null,
                     );
@@ -624,7 +678,12 @@ pub const TypeChecker = struct {
                 return left_typed.resolved_type;
             },
             .eq, .ne, .lt, .gt, .le, .ge => {
-                if (!left_typed.resolved_type.eql(&right_typed.resolved_type)) {
+                // unify numeric literals in comparisons
+                const types_match = left_typed.resolved_type.eql(&right_typed.resolved_type) or
+                    (self.isNumericLiteral(binary.left) and self.isNumericType(&right_typed.resolved_type)) or
+                    (self.isNumericLiteral(binary.right) and self.isNumericType(&left_typed.resolved_type));
+
+                if (!types_match) {
                     try self.diagnostics_list.addError(
                         try std.fmt.allocPrint(
                             self.allocator,
@@ -633,9 +692,9 @@ pub const TypeChecker = struct {
                         ),
                         .{
                             .file = self.source_file,
-                            .line = 0,
-                            .column = 0,
-                            .length = 0,
+                            .line = loc.line,
+                            .column = loc.column,
+                            .length = 1,
                         },
                         null,
                     );
@@ -648,9 +707,9 @@ pub const TypeChecker = struct {
                         try self.allocator.dupe(u8, "logical operators require Bool operands"),
                         .{
                             .file = self.source_file,
-                            .line = 0,
-                            .column = 0,
-                            .length = 0,
+                            .line = loc.line,
+                            .column = loc.column,
+                            .length = 1,
                         },
                         null,
                     );
@@ -691,7 +750,12 @@ pub const TypeChecker = struct {
                     } else {
                         for (call.args, func.params, 0..) |arg, param_type, i| {
                             const arg_typed = try self.checkExpr(arg);
-                            if (!arg_typed.resolved_type.eql(&param_type)) {
+
+                            // allow numeric literals to unify with parameter types
+                            const types_match = arg_typed.resolved_type.eql(&param_type) or
+                                self.canUnifyNumericLiteral(arg, &arg_typed.resolved_type, &param_type);
+
+                            if (!types_match) {
                                 try self.diagnostics_list.addError(
                                     try std.fmt.allocPrint(
                                         self.allocator,

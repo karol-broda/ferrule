@@ -24,9 +24,10 @@ pub const TypeResolver = struct {
         };
     }
 
-    pub fn resolve(self: *TypeResolver, type_expr: ast.Type) !types.ResolvedType {
+    pub fn resolve(self: *TypeResolver, type_expr: ast.Type) std.mem.Allocator.Error!types.ResolvedType {
         return switch (type_expr) {
             .simple => |simple| try self.resolveSimple(simple),
+            .generic => |gen| try self.resolveGeneric(gen),
             .array => |arr| try self.resolveArray(arr),
             .vector => |vec| try self.resolveVector(vec),
             .view => |view| try self.resolveView(view),
@@ -35,7 +36,7 @@ pub const TypeResolver = struct {
         };
     }
 
-    fn resolveSimple(self: *TypeResolver, simple: anytype) !types.ResolvedType {
+    fn resolveSimple(self: *TypeResolver, simple: anytype) std.mem.Allocator.Error!types.ResolvedType {
         const name = simple.name;
         const loc = simple.loc;
         const primitive_types = std.StaticStringMap(types.ResolvedType).initComptime(.{
@@ -105,6 +106,122 @@ pub const TypeResolver = struct {
                 .file = self.source_file,
                 .line = loc.line,
                 .column = loc.column,
+                .length = name.len,
+            },
+            null,
+        );
+        return types.ResolvedType.unit_type;
+    }
+
+    fn resolveGeneric(self: *TypeResolver, gen: anytype) std.mem.Allocator.Error!types.ResolvedType {
+        const name = gen.name;
+
+        // handle built-in generic types
+        if (std.mem.eql(u8, name, "Array")) {
+            if (gen.type_args.len != 1) {
+                try self.diagnostics_list.addError(
+                    try std.fmt.allocPrint(
+                        self.allocator,
+                        "Array expects 1 type argument, got {d}",
+                        .{gen.type_args.len},
+                    ),
+                    .{
+                        .file = self.source_file,
+                        .line = gen.loc.line,
+                        .column = gen.loc.column,
+                        .length = name.len,
+                    },
+                    null,
+                );
+                return types.ResolvedType.unit_type;
+            }
+
+            const element_type_ptr = try self.allocator.create(types.ResolvedType);
+            errdefer self.allocator.destroy(element_type_ptr);
+            element_type_ptr.* = try self.resolve(gen.type_args[0]);
+
+            // array with unknown size for now
+            return types.ResolvedType{
+                .array = .{
+                    .element_type = element_type_ptr,
+                    .size = 0,
+                },
+            };
+        }
+
+        if (std.mem.eql(u8, name, "Vector")) {
+            if (gen.type_args.len != 1) {
+                try self.diagnostics_list.addError(
+                    try std.fmt.allocPrint(
+                        self.allocator,
+                        "Vector expects 1 type argument, got {d}",
+                        .{gen.type_args.len},
+                    ),
+                    .{
+                        .file = self.source_file,
+                        .line = gen.loc.line,
+                        .column = gen.loc.column,
+                        .length = name.len,
+                    },
+                    null,
+                );
+                return types.ResolvedType.unit_type;
+            }
+
+            const element_type_ptr = try self.allocator.create(types.ResolvedType);
+            errdefer self.allocator.destroy(element_type_ptr);
+            element_type_ptr.* = try self.resolve(gen.type_args[0]);
+
+            return types.ResolvedType{
+                .vector = .{
+                    .element_type = element_type_ptr,
+                    .size = 0,
+                },
+            };
+        }
+
+        if (std.mem.eql(u8, name, "View")) {
+            if (gen.type_args.len != 1) {
+                try self.diagnostics_list.addError(
+                    try std.fmt.allocPrint(
+                        self.allocator,
+                        "View expects 1 type argument, got {d}",
+                        .{gen.type_args.len},
+                    ),
+                    .{
+                        .file = self.source_file,
+                        .line = gen.loc.line,
+                        .column = gen.loc.column,
+                        .length = name.len,
+                    },
+                    null,
+                );
+                return types.ResolvedType.unit_type;
+            }
+
+            const element_type_ptr = try self.allocator.create(types.ResolvedType);
+            errdefer self.allocator.destroy(element_type_ptr);
+            element_type_ptr.* = try self.resolve(gen.type_args[0]);
+
+            return types.ResolvedType{
+                .view = .{
+                    .element_type = element_type_ptr,
+                    .mutable = false,
+                },
+            };
+        }
+
+        // unknown generic type
+        try self.diagnostics_list.addError(
+            try std.fmt.allocPrint(
+                self.allocator,
+                "unknown generic type '{s}'",
+                .{name},
+            ),
+            .{
+                .file = self.source_file,
+                .line = gen.loc.line,
+                .column = gen.loc.column,
                 .length = name.len,
             },
             null,
