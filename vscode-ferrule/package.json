@@ -61,7 +61,7 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "pretest": "bun run compile",
-    "package": "bun run compile && vsce package --no-dependencies --allow-missing-repository --skip-license"
+    "package": "bun run compile && vsce package --allow-missing-repository --skip-license"
   },
   "repository": {
     "type": "git",
