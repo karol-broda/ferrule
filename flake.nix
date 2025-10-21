@@ -21,11 +21,14 @@
           packages = [
             pkgs-unstable.zig
             pkgs-unstable.bun
+            pkgs-unstable.llvmPackages_18.llvm
+            pkgs-unstable.llvmPackages_18.clang
           ];
 
           shellHook = ''
             if [ -n "$PS1" ]; then
               echo "zig: $(zig --version)"
+              echo "llvm: $(llvm-config --version)"
             fi
           '';
         };

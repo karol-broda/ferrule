@@ -83,6 +83,24 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    // link LLVM libraries for codegen
+    exe.linkLibC();
+    exe.linkLibCpp();
+
+    // link individual LLVM component libraries
+    exe.linkSystemLibrary("LLVMCore");
+    exe.linkSystemLibrary("LLVMSupport");
+    exe.linkSystemLibrary("LLVMIRReader");
+    exe.linkSystemLibrary("LLVMBitWriter");
+    exe.linkSystemLibrary("LLVMRemarks");
+    exe.linkSystemLibrary("LLVMBitstreamReader");
+    exe.linkSystemLibrary("LLVMBinaryFormat");
+    exe.linkSystemLibrary("LLVMTargetParser");
+    exe.linkSystemLibrary("LLVMDemangle");
+
+    // link ncurses for terminal support
+    exe.linkSystemLibrary("ncurses");
+
     // This declares intent for the executable to be installed into the
     // install prefix when running `zig build` (i.e. when executing the default
     // step). By default the install prefix is `zig-out/` but can be overridden

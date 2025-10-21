@@ -3,6 +3,7 @@ const lexer = @import("lexer.zig");
 const parser = @import("parser.zig");
 const printer = @import("printer.zig");
 const semantic = @import("semantic.zig");
+const codegen = @import("codegen.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -97,6 +98,23 @@ pub fn main() !void {
         defer mut_typed_module.deinit();
         std.debug.print("semantic analysis completed: {d} statements typed\n\n", .{mut_typed_module.statements.len});
     }
+
+    // code generation
+    std.debug.print("=== LLVM IR generation ===\n\n", .{});
+    var codegen_result = codegen.generateLLVMIR(
+        allocator,
+        module,
+        &analyzer.symbols,
+        &analyzer.diagnostics_list,
+        source_path,
+        source_path,
+    ) catch |err| {
+        std.debug.print("codegen error: {s}\n", .{@errorName(err)});
+        return err;
+    };
+    defer codegen_result.deinit();
+
+    std.debug.print("LLVM IR:\n{s}\n\n", .{codegen_result.llvm_ir});
 
     std.debug.print("=== compilation complete ===\n", .{});
 }
