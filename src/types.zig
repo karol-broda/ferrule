@@ -21,6 +21,18 @@ pub const ResolvedType = union(enum) {
     bytes_type,
     unit_type,
 
+    // capability types
+    fs_cap,
+    net_cap,
+    io_cap,
+    time_cap,
+    rng_cap,
+    alloc_cap,
+    cpu_cap,
+    atomics_cap,
+    simd_cap,
+    ffi_cap,
+
     array: struct {
         element_type: *ResolvedType,
         size: usize,
@@ -53,7 +65,7 @@ pub const ResolvedType = union(enum) {
 
     pub fn clone(self: ResolvedType, allocator: std.mem.Allocator) std.mem.Allocator.Error!ResolvedType {
         return switch (self) {
-            .i8, .i16, .i32, .i64, .i128, .u8, .u16, .u32, .u64, .u128, .usize_type, .f16, .f32, .f64, .bool_type, .char_type, .string_type, .bytes_type, .unit_type => self,
+            .i8, .i16, .i32, .i64, .i128, .u8, .u16, .u32, .u64, .u128, .usize_type, .f16, .f32, .f64, .bool_type, .char_type, .string_type, .bytes_type, .unit_type, .fs_cap, .net_cap, .io_cap, .time_cap, .rng_cap, .alloc_cap, .cpu_cap, .atomics_cap, .simd_cap, .ffi_cap => self,
             .array => |a| {
                 const elem_ptr = try allocator.create(ResolvedType);
                 elem_ptr.* = try a.element_type.clone(allocator);
@@ -125,7 +137,7 @@ pub const ResolvedType = union(enum) {
 
     pub fn deinit(self: *const ResolvedType, allocator: std.mem.Allocator) void {
         switch (self.*) {
-            .i8, .i16, .i32, .i64, .i128, .u8, .u16, .u32, .u64, .u128, .usize_type, .f16, .f32, .f64, .bool_type, .char_type, .string_type, .bytes_type, .unit_type => {},
+            .i8, .i16, .i32, .i64, .i128, .u8, .u16, .u32, .u64, .u128, .usize_type, .f16, .f32, .f64, .bool_type, .char_type, .string_type, .bytes_type, .unit_type, .fs_cap, .net_cap, .io_cap, .time_cap, .rng_cap, .alloc_cap, .cpu_cap, .atomics_cap, .simd_cap, .ffi_cap => {},
             .array => |a| {
                 a.element_type.deinit(allocator);
                 allocator.destroy(a.element_type);
@@ -173,7 +185,7 @@ pub const ResolvedType = union(enum) {
         }
 
         return switch (self.*) {
-            .i8, .i16, .i32, .i64, .i128, .u8, .u16, .u32, .u64, .u128, .usize_type, .f16, .f32, .f64, .bool_type, .char_type, .string_type, .bytes_type, .unit_type => true,
+            .i8, .i16, .i32, .i64, .i128, .u8, .u16, .u32, .u64, .u128, .usize_type, .f16, .f32, .f64, .bool_type, .char_type, .string_type, .bytes_type, .unit_type, .fs_cap, .net_cap, .io_cap, .time_cap, .rng_cap, .alloc_cap, .cpu_cap, .atomics_cap, .simd_cap, .ffi_cap => true,
             .array => |a| {
                 const other_array = other.array;
                 return a.size == other_array.size and a.element_type.eql(other_array.element_type);
@@ -241,6 +253,16 @@ pub const ResolvedType = union(enum) {
             .string_type => try writer.writeAll("String"),
             .bytes_type => try writer.writeAll("Bytes"),
             .unit_type => try writer.writeAll("()"),
+            .fs_cap => try writer.writeAll("Fs"),
+            .net_cap => try writer.writeAll("Net"),
+            .io_cap => try writer.writeAll("Io"),
+            .time_cap => try writer.writeAll("Time"),
+            .rng_cap => try writer.writeAll("Rng"),
+            .alloc_cap => try writer.writeAll("Alloc"),
+            .cpu_cap => try writer.writeAll("Cpu"),
+            .atomics_cap => try writer.writeAll("Atomics"),
+            .simd_cap => try writer.writeAll("Simd"),
+            .ffi_cap => try writer.writeAll("Ffi"),
             .array => |a| {
                 if (a.size == 0) {
                     // dynamic sized array - display as Array<T>

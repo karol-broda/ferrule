@@ -58,6 +58,16 @@ pub const TypeResolver = struct {
             .{ "Char", .char_type },
             .{ "String", .string_type },
             .{ "Bytes", .bytes_type },
+            .{ "Fs", .fs_cap },
+            .{ "Net", .net_cap },
+            .{ "Io", .io_cap },
+            .{ "Time", .time_cap },
+            .{ "Rng", .rng_cap },
+            .{ "Alloc", .alloc_cap },
+            .{ "Cpu", .cpu_cap },
+            .{ "Atomics", .atomics_cap },
+            .{ "Simd", .simd_cap },
+            .{ "Ffi", .ffi_cap },
         });
 
         if (primitive_types.get(name)) |primitive| {
