@@ -1118,6 +1118,39 @@ pub const Parser = struct {
             return expr;
         }
 
+        if (self.match(.lbracket)) {
+            var elements: std.ArrayList(*ast.Expr) = .empty;
+            errdefer {
+                for (elements.items) |elem| {
+                    ast.deinitExpr(elem, self.allocator);
+                }
+                elements.deinit(self.allocator);
+            }
+
+            if (!self.check(.rbracket)) {
+                const first_elem = try self.expression();
+                elements.append(self.allocator, first_elem) catch |err| {
+                    ast.deinitExpr(first_elem, self.allocator);
+                    return err;
+                };
+
+                while (self.match(.comma)) {
+                    if (self.check(.rbracket)) break;
+                    const elem = try self.expression();
+                    elements.append(self.allocator, elem) catch |err| {
+                        ast.deinitExpr(elem, self.allocator);
+                        return err;
+                    };
+                }
+            }
+
+            _ = try self.consume(.rbracket, "expected ']' after array elements");
+
+            const expr = try self.allocator.create(ast.Expr);
+            expr.* = ast.Expr{ .array_literal = .{ .elements = elements.toOwnedSlice(self.allocator) catch return ParseError.OutOfMemory } };
+            return expr;
+        }
+
         if (self.match(.lparen)) {
             const expr = try self.expression();
             _ = try self.consume(.rparen, "expected ')' after expression");
@@ -1128,6 +1161,12 @@ pub const Parser = struct {
     }
 
     fn parseType(self: *Parser) ParseError!ast.Type {
+        if (self.match(.number)) {
+            const num = self.previous();
+            const loc = ast.Location{ .line = num.line, .column = num.column };
+            return ast.Type{ .simple = .{ .name = num.lexeme, .loc = loc } };
+        }
+
         if (self.match(.identifier)) {
             const name = self.previous();
             const loc = ast.Location{ .line = name.line, .column = name.column };

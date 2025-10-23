@@ -128,11 +128,11 @@ pub const TypeResolver = struct {
 
         // handle built-in generic types
         if (std.mem.eql(u8, name, "Array")) {
-            if (gen.type_args.len != 1) {
+            if (gen.type_args.len < 1 or gen.type_args.len > 2) {
                 try self.diagnostics_list.addError(
                     try std.fmt.allocPrint(
                         self.allocator,
-                        "Array expects 1 type argument, got {d}",
+                        "Array expects 1 or 2 type arguments (Array<T> or Array<T, n>), got {d}",
                         .{gen.type_args.len},
                     ),
                     .{
@@ -150,21 +150,25 @@ pub const TypeResolver = struct {
             errdefer self.allocator.destroy(element_type_ptr);
             element_type_ptr.* = try self.resolve(gen.type_args[0]);
 
-            // array with unknown size for now
+            var size: usize = 0;
+            if (gen.type_args.len == 2) {
+                size = try self.evaluateTypeArgAsSize(gen.type_args[1]);
+            }
+
             return types.ResolvedType{
                 .array = .{
                     .element_type = element_type_ptr,
-                    .size = 0,
+                    .size = size,
                 },
             };
         }
 
         if (std.mem.eql(u8, name, "Vector")) {
-            if (gen.type_args.len != 1) {
+            if (gen.type_args.len < 1 or gen.type_args.len > 2) {
                 try self.diagnostics_list.addError(
                     try std.fmt.allocPrint(
                         self.allocator,
-                        "Vector expects 1 type argument, got {d}",
+                        "Vector expects 1 or 2 type arguments (Vector<T> or Vector<T, n>), got {d}",
                         .{gen.type_args.len},
                     ),
                     .{
@@ -182,10 +186,15 @@ pub const TypeResolver = struct {
             errdefer self.allocator.destroy(element_type_ptr);
             element_type_ptr.* = try self.resolve(gen.type_args[0]);
 
+            var size: usize = 0;
+            if (gen.type_args.len == 2) {
+                size = try self.evaluateTypeArgAsSize(gen.type_args[1]);
+            }
+
             return types.ResolvedType{
                 .vector = .{
                     .element_type = element_type_ptr,
-                    .size = 0,
+                    .size = size,
                 },
             };
         }
@@ -361,6 +370,43 @@ pub const TypeResolver = struct {
             else => {
                 try self.diagnostics_list.addError(
                     try self.allocator.dupe(u8, "array/vector size must be a constant expression"),
+                    .{
+                        .file = self.source_file,
+                        .line = 0,
+                        .column = 0,
+                        .length = 0,
+                    },
+                    null,
+                );
+                return 0;
+            },
+        }
+    }
+
+    fn evaluateTypeArgAsSize(self: *TypeResolver, type_arg: ast.Type) !usize {
+        switch (type_arg) {
+            .simple => |simple| {
+                return std.fmt.parseInt(usize, simple.name, 10) catch {
+                    try self.diagnostics_list.addError(
+                        try std.fmt.allocPrint(
+                            self.allocator,
+                            "invalid array/vector size: '{s}'",
+                            .{simple.name},
+                        ),
+                        .{
+                            .file = self.source_file,
+                            .line = simple.loc.line,
+                            .column = simple.loc.column,
+                            .length = simple.name.len,
+                        },
+                        try self.allocator.dupe(u8, "size must be a positive integer"),
+                    );
+                    return 0;
+                };
+            },
+            else => {
+                try self.diagnostics_list.addError(
+                    try self.allocator.dupe(u8, "array/vector size must be a constant integer"),
                     .{
                         .file = self.source_file,
                         .line = 0,

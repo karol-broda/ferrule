@@ -60,7 +60,13 @@ pub const LLVMBackend = struct {
 
     pub fn deinit(self: *LLVMBackend) void {
         self.named_values.deinit();
+
+        var type_iter = self.named_types.valueIterator();
+        while (type_iter.next()) |resolved_type| {
+            resolved_type.deinit(self.allocator);
+        }
         self.named_types.deinit();
+
         self.functions.deinit();
         llvm.builderDispose(self.builder);
         llvm.moduleDispose(self.module);
@@ -155,6 +161,11 @@ pub const LLVMBackend = struct {
 
         // clear named values for new function scope
         self.named_values.clearRetainingCapacity();
+
+        var type_iter = self.named_types.valueIterator();
+        while (type_iter.next()) |resolved_type| {
+            resolved_type.deinit(self.allocator);
+        }
         self.named_types.clearRetainingCapacity();
 
         // add function parameters to named values
@@ -191,20 +202,25 @@ pub const LLVMBackend = struct {
     fn generateStatement(self: *LLVMBackend, stmt: ast.Stmt) error{ OutOfMemory, UndefinedVariable, ExpressionNotImplemented, TypeInferenceFailed, FunctionNotFound, OperationNotImplemented, InvalidNumber, StatementNotImplemented, NoCurrentFunction, NoElseBlock }!void {
         switch (stmt) {
             .const_decl => |const_decl| {
-                const value = try self.generateExpression(const_decl.value);
-
-                // create alloca for the variable
                 const var_type = try self.inferExpressionType(const_decl.value);
-                const llvm_type = try self.type_mapper.mapType(var_type);
 
-                const var_name_z = try self.allocator.dupeZ(u8, const_decl.name);
-                defer self.allocator.free(var_name_z);
+                if (const_decl.value.* == .array_literal) {
+                    const value_ptr = try self.generateExpression(const_decl.value);
+                    try self.named_values.put(const_decl.name, value_ptr);
+                    try self.named_types.put(const_decl.name, var_type);
+                } else {
+                    const value = try self.generateExpression(const_decl.value);
+                    const llvm_type = try self.type_mapper.mapType(var_type);
 
-                const alloca = llvm.buildAlloca(self.builder, llvm_type, var_name_z.ptr);
-                _ = llvm.buildStore(self.builder, value, alloca);
+                    const var_name_z = try self.allocator.dupeZ(u8, const_decl.name);
+                    defer self.allocator.free(var_name_z);
 
-                try self.named_values.put(const_decl.name, alloca);
-                try self.named_types.put(const_decl.name, var_type);
+                    const alloca = llvm.buildAlloca(self.builder, llvm_type, var_name_z.ptr);
+                    _ = llvm.buildStore(self.builder, value, alloca);
+
+                    try self.named_values.put(const_decl.name, alloca);
+                    try self.named_types.put(const_decl.name, var_type);
+                }
             },
 
             .var_decl => |var_decl| {
@@ -290,9 +306,8 @@ pub const LLVMBackend = struct {
                 return error.StatementNotImplemented;
             },
 
-            .for_stmt => {
-                // for loops
-                return error.StatementNotImplemented;
+            .for_stmt => |for_stmt| {
+                try self.generateForStatement(for_stmt);
             },
 
             .match_stmt => {
@@ -367,6 +382,23 @@ pub const LLVMBackend = struct {
                 return llvm.buildLoad(self.builder, llvm_type, var_ptr, load_name.ptr);
             },
 
+            .unary => |un_op| {
+                const operand = try self.generateExpression(un_op.operand);
+                const result_name = "unop\x00";
+
+                return switch (un_op.op) {
+                    .negate => {
+                        const zero = llvm.constInt(llvm.int32Type(self.context), 0, 0);
+                        return llvm.buildSub(self.builder, zero, operand, result_name);
+                    },
+                    .not => {
+                        const zero = llvm.constInt(llvm.int1Type(self.context), 0, 0);
+                        return llvm.buildICmp(self.builder, .eq, operand, zero, result_name);
+                    },
+                    .bitwise_not => return error.OperationNotImplemented,
+                };
+            },
+
             .binary => |bin_op| {
                 const lhs = try self.generateExpression(bin_op.left);
                 const rhs = try self.generateExpression(bin_op.right);
@@ -388,6 +420,39 @@ pub const LLVMBackend = struct {
                     .ge => llvm.buildICmp(self.builder, .sge, lhs, rhs, cmp_name),
                     else => error.OperationNotImplemented,
                 };
+            },
+
+            .bool_literal => |val| {
+                const bool_type = llvm.int1Type(self.context);
+                return llvm.constInt(bool_type, if (val) 1 else 0, 0);
+            },
+
+            .array_literal => |al| {
+                if (al.elements.len == 0) {
+                    return error.ExpressionNotImplemented;
+                }
+
+                const elem_type_resolved = try self.inferExpressionType(al.elements[0]);
+                const elem_type = try self.type_mapper.mapType(elem_type_resolved);
+                const array_type = llvm.arrayType(elem_type, @intCast(al.elements.len));
+
+                const element_values = try self.allocator.alloc(*llvm.ValueRef, al.elements.len);
+                defer self.allocator.free(element_values);
+
+                for (al.elements, 0..) |elem, i| {
+                    element_values[i] = try self.generateExpression(elem);
+                }
+
+                const array_alloca = llvm.buildAlloca(self.builder, array_type, "array\x00");
+
+                for (element_values, 0..) |val, i| {
+                    const i32_type = llvm.int32Type(self.context);
+                    const indices = [_]*llvm.ValueRef{ llvm.constInt(i32_type, 0, 0), llvm.constInt(i32_type, @intCast(i), 0) };
+                    const elem_ptr = llvm.buildGEP(self.builder, array_type, array_alloca, &indices, 2, "elem.ptr\x00");
+                    _ = llvm.buildStore(self.builder, val, elem_ptr);
+                }
+
+                return array_alloca;
             },
 
             .call => |call| {
@@ -498,11 +563,82 @@ pub const LLVMBackend = struct {
         llvm.positionBuilderAtEnd(self.builder, exit_block);
     }
 
+    fn generateForStatement(self: *LLVMBackend, for_stmt: ast.ForStmt) error{ OutOfMemory, UndefinedVariable, ExpressionNotImplemented, TypeInferenceFailed, FunctionNotFound, OperationNotImplemented, InvalidNumber, StatementNotImplemented, NoCurrentFunction, NoElseBlock }!void {
+        const current_func = self.current_function orelse return error.NoCurrentFunction;
+
+        const iterable_type = try self.inferExpressionType(for_stmt.iterable);
+
+        if (iterable_type != .array) {
+            return error.TypeInferenceFailed;
+        }
+
+        const array_len = iterable_type.array.size;
+        const elem_type = try self.type_mapper.mapType(iterable_type.array.element_type.*);
+
+        const i32_type = llvm.int32Type(self.context);
+        const counter_alloca = llvm.buildAlloca(self.builder, i32_type, "for.counter\x00");
+        _ = llvm.buildStore(self.builder, llvm.constInt(i32_type, 0, 0), counter_alloca);
+
+        const elem_alloca = llvm.buildAlloca(self.builder, elem_type, "for.elem\x00");
+
+        const cond_block = llvm.appendBasicBlock(self.context, current_func, "for.cond\x00");
+        const body_block = llvm.appendBasicBlock(self.context, current_func, "for.body\x00");
+        const exit_block = llvm.appendBasicBlock(self.context, current_func, "for.exit\x00");
+
+        _ = llvm.buildBr(self.builder, cond_block);
+
+        llvm.positionBuilderAtEnd(self.builder, cond_block);
+        const counter_val = llvm.buildLoad(self.builder, i32_type, counter_alloca, "counter\x00");
+        const array_len_val = llvm.constInt(i32_type, @intCast(array_len), 0);
+        const cond = llvm.buildICmp(self.builder, .slt, counter_val, array_len_val, "for.cond\x00");
+        _ = llvm.buildCondBr(self.builder, cond, body_block, exit_block);
+
+        llvm.positionBuilderAtEnd(self.builder, body_block);
+
+        const iterable_ptr = if (for_stmt.iterable.* == .identifier)
+            self.named_values.get(for_stmt.iterable.identifier.name) orelse return error.UndefinedVariable
+        else
+            try self.generateExpression(for_stmt.iterable);
+
+        const array_type = llvm.arrayType(elem_type, @intCast(array_len));
+        const indices = [_]*llvm.ValueRef{ llvm.constInt(i32_type, 0, 0), counter_val };
+        const elem_ptr = llvm.buildGEP(self.builder, array_type, iterable_ptr, &indices, 2, "elem.ptr\x00");
+        const elem_val = llvm.buildLoad(self.builder, elem_type, elem_ptr, "elem\x00");
+        _ = llvm.buildStore(self.builder, elem_val, elem_alloca);
+
+        const prev_iterator_value = self.named_values.get(for_stmt.iterator);
+        const prev_iterator_type = self.named_types.get(for_stmt.iterator);
+        try self.named_values.put(for_stmt.iterator, elem_alloca);
+        try self.named_types.put(for_stmt.iterator, iterable_type.array.element_type.*);
+
+        for (for_stmt.body) |stmt| {
+            try self.generateStatement(stmt);
+        }
+
+        const next_counter = llvm.buildAdd(self.builder, counter_val, llvm.constInt(i32_type, 1, 0), "counter.next\x00");
+        _ = llvm.buildStore(self.builder, next_counter, counter_alloca);
+        _ = llvm.buildBr(self.builder, cond_block);
+
+        if (prev_iterator_value) |prev_val| {
+            try self.named_values.put(for_stmt.iterator, prev_val);
+        } else {
+            _ = self.named_values.remove(for_stmt.iterator);
+        }
+
+        if (prev_iterator_type) |prev_type| {
+            try self.named_types.put(for_stmt.iterator, prev_type);
+        } else {
+            _ = self.named_types.remove(for_stmt.iterator);
+        }
+
+        llvm.positionBuilderAtEnd(self.builder, exit_block);
+    }
+
     fn inferExpressionType(self: *LLVMBackend, expr: *ast.Expr) !types.ResolvedType {
         return switch (expr.*) {
-            .number => types.ResolvedType{ .i32 = {} },
-            .string => types.ResolvedType{ .string_type = {} },
-            .bool_literal => types.ResolvedType{ .bool_type = {} },
+            .number => types.ResolvedType.i32,
+            .string => types.ResolvedType.string_type,
+            .bool_literal => types.ResolvedType.bool_type,
             .identifier => |ident| {
                 // first check local variables and parameters
                 if (self.named_types.get(ident.name)) |local_type| {
@@ -529,6 +665,21 @@ pub const LLVMBackend = struct {
                 // for simplicity, assume both operands have same type
                 return try self.inferExpressionType(bin_op.left);
             },
+            .unary => |un_op| {
+                return try self.inferExpressionType(un_op.operand);
+            },
+            .array_literal => |al| {
+                if (al.elements.len == 0) return error.TypeInferenceFailed;
+                const elem_type = try self.inferExpressionType(al.elements[0]);
+                const elem_type_ptr = try self.allocator.create(types.ResolvedType);
+                elem_type_ptr.* = elem_type;
+                return types.ResolvedType{
+                    .array = .{
+                        .element_type = elem_type_ptr,
+                        .size = al.elements.len,
+                    },
+                };
+            },
             else => error.TypeInferenceFailed,
         };
     }
@@ -538,5 +689,19 @@ pub const LLVMBackend = struct {
         defer llvm.disposeMessage(ir_str);
 
         return try self.allocator.dupe(u8, std.mem.span(ir_str));
+    }
+
+    pub fn writeIRToFile(self: *LLVMBackend, filename: []const u8) !void {
+        const filename_z = try self.allocator.dupeZ(u8, filename);
+        defer self.allocator.free(filename_z);
+
+        var error_msg: [*:0]u8 = undefined;
+        const result = llvm.printModuleToFile(self.module, filename_z.ptr, &error_msg);
+        if (result != 0) {
+            defer llvm.disposeMessage(error_msg);
+            const err_str = std.mem.span(error_msg);
+            std.debug.print("failed to write IR to file: {s}\n", .{err_str});
+            return error.LLVMWriteIRFailed;
+        }
     }
 };

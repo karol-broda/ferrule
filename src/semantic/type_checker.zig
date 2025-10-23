@@ -147,6 +147,10 @@ pub const TypeChecker = struct {
 
     fn checkConstDecl(self: *TypeChecker, const_decl: ast.ConstDecl) !void {
         const value_typed = try self.checkExpr(const_decl.value);
+        defer {
+            // only deinit effects array, not the resolved_type since it's transferred to final_type
+            self.allocator.free(value_typed.effects);
+        }
 
         // require explicit type annotation for numeric literals
         if (const_decl.type_annotation == null and self.isNumericLiteral(const_decl.value)) {
@@ -167,9 +171,11 @@ pub const TypeChecker = struct {
         }
 
         var final_type = value_typed.resolved_type;
+        var should_deinit_value_type = false;
 
         if (const_decl.type_annotation) |type_annotation| {
             const declared_type = try self.type_resolver.resolve(type_annotation);
+            should_deinit_value_type = true;
             final_type = declared_type;
 
             // allow numeric literals to unify with the declared type
@@ -191,6 +197,10 @@ pub const TypeChecker = struct {
                     );
                 }
             }
+        }
+
+        if (should_deinit_value_type) {
+            value_typed.resolved_type.deinit(self.allocator);
         }
 
         const const_symbol = symbol_table.Symbol{
@@ -215,6 +225,7 @@ pub const TypeChecker = struct {
 
     pub fn checkVarDecl(self: *TypeChecker, var_decl: ast.VarDecl) !void {
         const value_typed = try self.checkExpr(var_decl.value);
+        defer self.allocator.free(value_typed.effects);
 
         // require explicit type annotation for numeric literals
         if (var_decl.type_annotation == null and self.isNumericLiteral(var_decl.value)) {
@@ -235,9 +246,11 @@ pub const TypeChecker = struct {
         }
 
         var final_type = value_typed.resolved_type;
+        var should_deinit_value_type = false;
 
         if (var_decl.type_annotation) |type_annotation| {
             const declared_type = try self.type_resolver.resolve(type_annotation);
+            should_deinit_value_type = true;
             final_type = declared_type;
 
             // allow numeric literals to unify with the declared type
@@ -259,6 +272,10 @@ pub const TypeChecker = struct {
                     );
                 }
             }
+        }
+
+        if (should_deinit_value_type) {
+            value_typed.resolved_type.deinit(self.allocator);
         }
 
         const var_symbol = symbol_table.Symbol{
@@ -286,6 +303,10 @@ pub const TypeChecker = struct {
         if (self.current_function) |func| {
             if (return_stmt.value) |expr| {
                 const expr_typed = try self.checkExpr(expr);
+                defer {
+                    expr_typed.resolved_type.deinit(self.allocator);
+                    self.allocator.free(expr_typed.effects);
+                }
 
                 // allow numeric literals to unify with the expected return type
                 const types_match = func.return_type.eql(&expr_typed.resolved_type) or
@@ -333,11 +354,17 @@ pub const TypeChecker = struct {
     }
 
     fn checkExprStmt(self: *TypeChecker, expr: *ast.Expr) !void {
-        _ = try self.checkExpr(expr);
+        const typed_expr = try self.checkExpr(expr);
+        typed_expr.resolved_type.deinit(self.allocator);
+        self.allocator.free(typed_expr.effects);
     }
 
     pub fn checkAssignStmt(self: *TypeChecker, assign: ast.AssignStmt) !void {
         const value_typed = try self.checkExpr(assign.value);
+        defer {
+            value_typed.resolved_type.deinit(self.allocator);
+            self.allocator.free(value_typed.effects);
+        }
 
         // track reference to the assignment target
         try self.location_table.addReference(
@@ -429,6 +456,10 @@ pub const TypeChecker = struct {
 
     pub fn checkIfStmt(self: *TypeChecker, if_stmt: ast.IfStmt) !void {
         const condition_typed = try self.checkExpr(if_stmt.condition);
+        defer {
+            condition_typed.resolved_type.deinit(self.allocator);
+            self.allocator.free(condition_typed.effects);
+        }
         if (condition_typed.resolved_type != .bool_type) {
             try self.diagnostics_list.addError(
                 try std.fmt.allocPrint(
@@ -459,6 +490,10 @@ pub const TypeChecker = struct {
 
     pub fn checkWhileStmt(self: *TypeChecker, while_stmt: ast.WhileStmt) !void {
         const condition_typed = try self.checkExpr(while_stmt.condition);
+        defer {
+            condition_typed.resolved_type.deinit(self.allocator);
+            self.allocator.free(condition_typed.effects);
+        }
         if (condition_typed.resolved_type != .bool_type) {
             try self.diagnostics_list.addError(
                 try std.fmt.allocPrint(
@@ -483,6 +518,9 @@ pub const TypeChecker = struct {
 
     fn checkForStmt(self: *TypeChecker, for_stmt: ast.ForStmt) !void {
         const iterable_typed = try self.checkExpr(for_stmt.iterable);
+        defer {
+            self.allocator.free(iterable_typed.effects);
+        }
 
         var new_scope = symbol_table.Scope.init(self.allocator, self.current_scope, self.current_scope.scope_level + 1);
         defer new_scope.deinit();
@@ -493,10 +531,11 @@ pub const TypeChecker = struct {
 
         // infer iterator element type from iterable
         const element_type = switch (iterable_typed.resolved_type) {
-            .array => |arr| arr.element_type.*,
-            .view => |view| view.element_type.*,
+            .array => |arr| try arr.element_type.clone(self.allocator),
+            .view => |view| try view.element_type.clone(self.allocator),
             else => types.ResolvedType.unit_type,
         };
+        defer iterable_typed.resolved_type.deinit(self.allocator);
 
         // add iterator variable to scope
         const iterator_symbol = symbol_table.Symbol{
@@ -525,10 +564,17 @@ pub const TypeChecker = struct {
 
     fn checkMatchStmt(self: *TypeChecker, match_stmt: ast.MatchStmt) !void {
         const value_typed = try self.checkExpr(match_stmt.value);
-        _ = value_typed;
+        defer {
+            value_typed.resolved_type.deinit(self.allocator);
+            self.allocator.free(value_typed.effects);
+        }
 
         for (match_stmt.arms) |arm| {
-            _ = try self.checkExpr(arm.body);
+            const arm_typed = try self.checkExpr(arm.body);
+            defer {
+                arm_typed.resolved_type.deinit(self.allocator);
+                self.allocator.free(arm_typed.effects);
+            }
         }
     }
 
@@ -544,6 +590,7 @@ pub const TypeChecker = struct {
             .unary => |ue| try self.checkUnary(ue),
             .call => |ce| try self.checkCall(ce),
             .field_access => |fa| try self.checkFieldAccess(fa),
+            .array_literal => |al| try self.checkArrayLiteral(al),
             .ok => |ok_expr| try self.checkOk(ok_expr),
             .err => |ee| try self.checkErr(ee),
             .check => |ce| try self.checkCheck(ce),
@@ -641,7 +688,9 @@ pub const TypeChecker = struct {
 
     fn checkBinary(self: *TypeChecker, binary: ast.BinaryExpr) !types.ResolvedType {
         const left_typed = try self.checkExpr(binary.left);
+        defer self.allocator.free(left_typed.effects);
         const right_typed = try self.checkExpr(binary.right);
+        defer self.allocator.free(right_typed.effects);
 
         // try to get location from left operand if it's an identifier
         const loc = if (binary.left.* == .identifier)
@@ -653,9 +702,11 @@ pub const TypeChecker = struct {
             .add, .subtract, .multiply, .divide, .modulo => {
                 // unify numeric literals
                 if (self.isNumericLiteral(binary.left) and self.isNumericType(&right_typed.resolved_type)) {
+                    left_typed.resolved_type.deinit(self.allocator);
                     return right_typed.resolved_type;
                 }
                 if (self.isNumericLiteral(binary.right) and self.isNumericType(&left_typed.resolved_type)) {
+                    right_typed.resolved_type.deinit(self.allocator);
                     return left_typed.resolved_type;
                 }
 
@@ -675,6 +726,7 @@ pub const TypeChecker = struct {
                         null,
                     );
                 }
+                right_typed.resolved_type.deinit(self.allocator);
                 return left_typed.resolved_type;
             },
             .eq, .ne, .lt, .gt, .le, .ge => {
@@ -699,6 +751,8 @@ pub const TypeChecker = struct {
                         null,
                     );
                 }
+                left_typed.resolved_type.deinit(self.allocator);
+                right_typed.resolved_type.deinit(self.allocator);
                 return types.ResolvedType.bool_type;
             },
             .logical_and, .logical_or => {
@@ -714,14 +768,20 @@ pub const TypeChecker = struct {
                         null,
                     );
                 }
+                left_typed.resolved_type.deinit(self.allocator);
+                right_typed.resolved_type.deinit(self.allocator);
                 return types.ResolvedType.bool_type;
             },
-            else => return left_typed.resolved_type,
+            else => {
+                right_typed.resolved_type.deinit(self.allocator);
+                return left_typed.resolved_type;
+            },
         }
     }
 
     fn checkUnary(self: *TypeChecker, unary: ast.UnaryExpr) !types.ResolvedType {
         const operand_typed = try self.checkExpr(unary.operand);
+        defer self.allocator.free(operand_typed.effects);
         return operand_typed.resolved_type;
     }
 
@@ -750,6 +810,10 @@ pub const TypeChecker = struct {
                     } else {
                         for (call.args, func.params, 0..) |arg, param_type, i| {
                             const arg_typed = try self.checkExpr(arg);
+                            defer {
+                                arg_typed.resolved_type.deinit(self.allocator);
+                                self.allocator.free(arg_typed.effects);
+                            }
 
                             // allow numeric literals to unify with parameter types
                             const types_match = arg_typed.resolved_type.eql(&param_type) or
@@ -784,13 +848,17 @@ pub const TypeChecker = struct {
 
     fn checkFieldAccess(self: *TypeChecker, field_access: ast.FieldAccessExpr) !types.ResolvedType {
         const object_typed = try self.checkExpr(field_access.object);
-        _ = object_typed;
+        defer {
+            object_typed.resolved_type.deinit(self.allocator);
+            self.allocator.free(object_typed.effects);
+        }
         _ = field_access.field;
         return types.ResolvedType.unit_type;
     }
 
     fn checkOk(self: *TypeChecker, ok_expr: *ast.Expr) !types.ResolvedType {
         const inner_typed = try self.checkExpr(ok_expr);
+        defer self.allocator.free(inner_typed.effects);
         return inner_typed.resolved_type;
     }
 
@@ -802,11 +870,16 @@ pub const TypeChecker = struct {
 
     fn checkCheck(self: *TypeChecker, check_expr: ast.CheckExpr) !types.ResolvedType {
         const expr_typed = try self.checkExpr(check_expr.expr);
+        defer self.allocator.free(expr_typed.effects);
         return expr_typed.resolved_type;
     }
 
     fn checkEnsure(self: *TypeChecker, ensure_expr: ast.EnsureExpr) !types.ResolvedType {
         const condition_typed = try self.checkExpr(ensure_expr.condition);
+        defer {
+            condition_typed.resolved_type.deinit(self.allocator);
+            self.allocator.free(condition_typed.effects);
+        }
         if (condition_typed.resolved_type != .bool_type) {
             try self.diagnostics_list.addError(
                 try self.allocator.dupe(u8, "ensure condition must be Bool"),
@@ -824,12 +897,19 @@ pub const TypeChecker = struct {
 
     fn checkMatchExpr(self: *TypeChecker, match_expr: ast.MatchExpr) !types.ResolvedType {
         const value_typed = try self.checkExpr(match_expr.value);
-        _ = value_typed;
+        defer {
+            value_typed.resolved_type.deinit(self.allocator);
+            self.allocator.free(value_typed.effects);
+        }
 
         var result_type: ?types.ResolvedType = null;
         for (match_expr.arms) |arm| {
             const arm_typed = try self.checkExpr(arm.body);
             if (result_type) |rt| {
+                defer {
+                    arm_typed.resolved_type.deinit(self.allocator);
+                    self.allocator.free(arm_typed.effects);
+                }
                 if (!rt.eql(&arm_typed.resolved_type)) {
                     try self.diagnostics_list.addError(
                         try self.allocator.dupe(u8, "match arms must have the same type"),
@@ -843,11 +923,68 @@ pub const TypeChecker = struct {
                     );
                 }
             } else {
+                defer self.allocator.free(arm_typed.effects);
                 result_type = arm_typed.resolved_type;
             }
         }
 
         return result_type orelse types.ResolvedType.unit_type;
+    }
+
+    fn checkArrayLiteral(self: *TypeChecker, array_literal: ast.ArrayLiteralExpr) !types.ResolvedType {
+        if (array_literal.elements.len == 0) {
+            try self.diagnostics_list.addError(
+                try self.allocator.dupe(u8, "cannot infer type of empty array literal"),
+                .{
+                    .file = self.source_file,
+                    .line = 0,
+                    .column = 0,
+                    .length = 0,
+                },
+                null,
+            );
+            return types.ResolvedType.unit_type;
+        }
+
+        const first_elem_typed = try self.checkExpr(array_literal.elements[0]);
+        defer {
+            self.allocator.free(first_elem_typed.effects);
+        }
+        const element_type = first_elem_typed.resolved_type;
+
+        for (array_literal.elements[1..]) |elem| {
+            const elem_typed = try self.checkExpr(elem);
+            defer {
+                elem_typed.resolved_type.deinit(self.allocator);
+                self.allocator.free(elem_typed.effects);
+            }
+            if (!elem_typed.resolved_type.eql(&element_type)) {
+                try self.diagnostics_list.addError(
+                    try std.fmt.allocPrint(
+                        self.allocator,
+                        "array elements must have the same type: expected {any}, got {any}",
+                        .{ element_type, elem_typed.resolved_type },
+                    ),
+                    .{
+                        .file = self.source_file,
+                        .line = 0,
+                        .column = 0,
+                        .length = 0,
+                    },
+                    null,
+                );
+            }
+        }
+
+        const elem_type_ptr = try self.allocator.create(types.ResolvedType);
+        elem_type_ptr.* = try element_type.clone(self.allocator);
+
+        return types.ResolvedType{
+            .array = .{
+                .element_type = elem_type_ptr,
+                .size = array_literal.elements.len,
+            },
+        };
     }
 
     fn isNumericLiteral(self: *TypeChecker, expr: *ast.Expr) bool {

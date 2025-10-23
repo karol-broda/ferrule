@@ -188,11 +188,16 @@ pub const Expr = union(enum) {
     unary: UnaryExpr,
     call: CallExpr,
     field_access: FieldAccessExpr,
+    array_literal: ArrayLiteralExpr,
     ok: *Expr,
     err: ErrorExpr,
     check: CheckExpr,
     ensure: EnsureExpr,
     match_expr: MatchExpr,
+};
+
+pub const ArrayLiteralExpr = struct {
+    elements: []*Expr,
 };
 
 pub const BinaryOp = enum {
@@ -448,6 +453,12 @@ pub fn deinitExpr(expr: *const Expr, allocator: std.mem.Allocator) void {
                 deinitExpr(arm.body, allocator);
             }
             allocator.free(me.arms);
+        },
+        .array_literal => |al| {
+            for (al.elements) |elem| {
+                deinitExpr(elem, allocator);
+            }
+            allocator.free(al.elements);
         },
         .number, .string, .char, .identifier, .bool_literal, .null_literal => {},
     }

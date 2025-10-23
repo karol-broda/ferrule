@@ -350,3 +350,10 @@ pub fn setInitializer(global: *ValueRef, constant_val: *ValueRef) void {
 pub fn setGlobalConstant(global: *ValueRef, is_constant: c_int) void {
     LLVMSetGlobalConstant(global, is_constant);
 }
+
+// file output
+extern fn LLVMPrintModuleToFile(module: *ModuleRef, filename: [*:0]const u8, error_msg: *[*:0]u8) c_int;
+
+pub fn printModuleToFile(module: *ModuleRef, filename: [*:0]const u8, error_msg: *[*:0]u8) c_int {
+    return LLVMPrintModuleToFile(module, filename, error_msg);
+}

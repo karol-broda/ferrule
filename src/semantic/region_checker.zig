@@ -177,6 +177,11 @@ pub const RegionChecker = struct {
             .field_access => |fa| {
                 try self.checkExpr(fa.object);
             },
+            .array_literal => |al| {
+                for (al.elements) |elem| {
+                    try self.checkExpr(elem);
+                }
+            },
             .ok => |ok_expr| {
                 try self.checkExpr(ok_expr);
             },

@@ -1,0 +1,41 @@
+function sum_array() -> i32 {
+  const numbers: Array<i32, 5> = [1, 2, 3, 4, 5];
+  var total: i32 = 0;
+  for num in numbers {
+    total = total + num;
+  }
+  return total;
+}
+
+function product_array() -> i32 {
+  const factors: Array<i32, 4> = [2, 3, 4, 5];
+  var product: i32 = 1;
+  for num in factors {
+    product = product * num;
+  }
+  return product;
+}
+
+function count_positives() -> i32 {
+  const mixed: Array<i32, 6> = [-2, -1, 0, 1, 2, 3];
+  var count: i32 = 0;
+  for num in mixed {
+    if num > 0 {
+      count = count + 1;
+    }
+  }
+  return count;
+}
+
+function main() -> i32 {
+    // 15
+  const sum_result = sum_array();
+    // 120
+  const product_result = product_array();
+    // 3
+  const positive_count = count_positives();
+  
+  // 138
+  return sum_result + product_result + positive_count;
+}
+

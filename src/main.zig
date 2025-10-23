@@ -100,23 +100,81 @@ pub fn main() !void {
     }
 
     // code generation
-    std.debug.print("=== LLVM IR generation ===\n\n", .{});
-    var codegen_result = codegen.generateLLVMIR(
+    std.debug.print("=== code generation ===\n\n", .{});
+
+    // create out directory if it doesn't exist
+    std.fs.cwd().makeDir("out") catch |err| {
+        if (err != error.PathAlreadyExists) {
+            std.debug.print("failed to create out directory: {s}\n", .{@errorName(err)});
+            return err;
+        }
+    };
+
+    // extract base filename from source path
+    const base_name = blk: {
+        const path_sep_idx = if (std.mem.lastIndexOf(u8, source_path, "/")) |idx| idx + 1 else 0;
+        const name_with_ext = source_path[path_sep_idx..];
+        if (std.mem.lastIndexOf(u8, name_with_ext, ".fe")) |idx| {
+            break :blk name_with_ext[0..idx];
+        }
+        break :blk name_with_ext;
+    };
+
+    const output_base = try std.fmt.allocPrint(allocator, "out/{s}", .{base_name});
+    defer allocator.free(output_base);
+
+    codegen.generateFiles(
         allocator,
         module,
         &analyzer.symbols,
         &analyzer.diagnostics_list,
         source_path,
         source_path,
+        output_base,
     ) catch |err| {
         std.debug.print("codegen error: {s}\n", .{@errorName(err)});
         return err;
     };
-    defer codegen_result.deinit();
 
-    std.debug.print("LLVM IR:\n{s}\n\n", .{codegen_result.llvm_ir});
+    const ir_file = try std.fmt.allocPrint(allocator, "{s}.ll", .{output_base});
+    defer allocator.free(ir_file);
+    const asm_file = try std.fmt.allocPrint(allocator, "{s}.s", .{output_base});
+    defer allocator.free(asm_file);
+    const obj_file = try std.fmt.allocPrint(allocator, "{s}.o", .{output_base});
+    defer allocator.free(obj_file);
+    const exe_file = output_base;
 
-    std.debug.print("=== compilation complete ===\n", .{});
+    std.debug.print("generated files:\n", .{});
+    std.debug.print("  LLVM IR:  {s}\n", .{ir_file});
+    std.debug.print("  Assembly: {s}\n", .{asm_file});
+    std.debug.print("  Object:   {s}\n", .{obj_file});
+
+    // link object file to create executable
+    const link_cmd = try std.fmt.allocPrint(
+        allocator,
+        "cc {s} -o {s}",
+        .{ obj_file, exe_file },
+    );
+    defer allocator.free(link_cmd);
+
+    const link_result = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &[_][]const u8{ "sh", "-c", link_cmd },
+    }) catch |err| {
+        std.debug.print("failed to link: {s}\n", .{@errorName(err)});
+        return err;
+    };
+    defer allocator.free(link_result.stdout);
+    defer allocator.free(link_result.stderr);
+
+    if (link_result.term.Exited != 0) {
+        std.debug.print("linker failed:\n{s}\n", .{link_result.stderr});
+        return error.LinkerFailed;
+    }
+
+    std.debug.print("  Binary:   {s}\n", .{exe_file});
+
+    std.debug.print("\n=== compilation complete ===\n", .{});
 }
 
 test "simple test" {

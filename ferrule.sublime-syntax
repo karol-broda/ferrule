@@ -1,0 +1,124 @@
+%YAML 1.2
+---
+name: Ferrule
+file_extensions: [fe]
+scope: source.ferrule
+version: 2
+
+contexts:
+  main:
+    - include: comments
+    - include: keywords
+    - include: strings
+    - include: numbers
+    - include: constants
+    - include: types
+    - include: functions
+    - include: operators
+    - include: identifiers
+
+  comments:
+    - match: '//'
+      scope: punctuation.definition.comment.ferrule
+      push: line-comment
+    - match: '/\*'
+      scope: punctuation.definition.comment.begin.ferrule
+      push: block-comment
+
+  line-comment:
+    - meta_scope: comment.line.double-slash.ferrule
+    - match: $
+      pop: true
+
+  block-comment:
+    - meta_scope: comment.block.ferrule
+    - match: '\*/'
+      scope: punctuation.definition.comment.end.ferrule
+      pop: true
+
+  keywords:
+    - match: \b(if|else|match|for|while|break|continue|return|defer)\b
+      scope: keyword.control.ferrule
+    - match: \b(const|var|function|type|role|domain|effects|capability|component)\b
+      scope: keyword.declaration.ferrule
+    - match: \b(package|import|export|use|error|as|where|with|context|inout|comptime|derivation|asm|using|in|ok|err|check|ensure|map_error|cap)\b
+      scope: keyword.other.ferrule
+
+  strings:
+    - match: '"'
+      scope: punctuation.definition.string.begin.ferrule
+      push: double-quoted-string
+    - match: "'"
+      scope: punctuation.definition.string.begin.ferrule
+      push: single-quoted-string
+
+  double-quoted-string:
+    - meta_scope: string.quoted.double.ferrule
+    - match: '\\(n|r|t|\\|")'
+      scope: constant.character.escape.ferrule
+    - match: '"'
+      scope: punctuation.definition.string.end.ferrule
+      pop: true
+
+  single-quoted-string:
+    - meta_scope: string.quoted.single.ferrule
+    - match: "\\\\(n|r|t|\\\\|')"
+      scope: constant.character.escape.ferrule
+    - match: "'"
+      scope: punctuation.definition.string.end.ferrule
+      pop: true
+
+  numbers:
+    - match: \b0x[0-9a-fA-F]+\b
+      scope: constant.numeric.hex.ferrule
+    - match: \b0b[01]+\b
+      scope: constant.numeric.binary.ferrule
+    - match: \b0o[0-7]+\b
+      scope: constant.numeric.octal.ferrule
+    - match: \b[0-9]+\.[0-9]+([eE][+-]?[0-9]+)?\b
+      scope: constant.numeric.float.ferrule
+    - match: \b[0-9]+\b
+      scope: constant.numeric.integer.ferrule
+
+  constants:
+    - match: \b(true|false)\b
+      scope: constant.language.boolean.ferrule
+    - match: \bnull\b
+      scope: constant.language.null.ferrule
+
+  types:
+    - match: \b(i8|i16|i32|i64|i128|u8|u16|u32|u64|u128|usize|f16|f32|f64|Bool|Char|String|Bytes|Unit|Nat)\b
+      scope: support.type.primitive.ferrule
+    - match: \b(Array|Vector|View|Maybe|Result|Map|Set)\b
+      scope: support.type.compound.ferrule
+    - match: \b[A-Z][a-zA-Z0-9_]*\b
+      scope: entity.name.type.ferrule
+
+  functions:
+    - match: \b([a-z_][a-zA-Z0-9_]*)\s*(?=\()
+      scope: entity.name.function.ferrule
+
+  operators:
+    - match: '===|!=='
+      scope: keyword.operator.comparison.ferrule
+    - match: '<=|>=|<|>'
+      scope: keyword.operator.comparison.ferrule
+    - match: '&&|\|\||!'
+      scope: keyword.operator.logical.ferrule
+    - match: '\+|-|\*|/|%'
+      scope: keyword.operator.arithmetic.ferrule
+    - match: '&|\||\^|~|<<|>>'
+      scope: keyword.operator.bitwise.ferrule
+    - match: '='
+      scope: keyword.operator.assignment.ferrule
+    - match: '->|=>'
+      scope: keyword.operator.arrow.ferrule
+    - match: '\?|:|\.(?!\d)'
+      scope: keyword.operator.other.ferrule
+    - match: '[(){}\[\];,]'
+      scope: punctuation.ferrule
+
+  identifiers:
+    - match: '\b[a-z_][a-zA-Z0-9_]*\b'
+      scope: variable.other.ferrule
+

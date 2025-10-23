@@ -10,28 +10,37 @@ function fibonacci(n: u32) -> u32 {
   }
 }
 
-function count_to_ten() -> u32 {
-  var i: u32 = 0;
-  while i < 10 {
-    i = i + 1;
-  }
-  return i;
-}
-
-function sum_array(items: Array<i32>) -> i32 {
-  var total: i32 = 0;
-  for item in items {
-    total = total + item;
-  }
-  return total;
-}
-
-function classify(code: u32) -> String {
-  match code {
-    200 -> "ok";
-    404 -> "not found";
-    500 -> "server error";
-    _   -> "unknown";
+function factorial(n: u32) -> u32 {
+  if n === 0 {
+    return 1;
+  } else {
+    return n * factorial(n - 1);
   }
 }
 
+function max(a: i32, b: i32) -> i32 {
+  if a > b {
+    return a;
+  } else {
+    return b;
+  }
+}
+
+function is_even(n: u32) -> Bool {
+  if n === 0 {
+    return true;
+  } else {
+    if n === 1 {
+      return false;
+    } else {
+      return is_even(n - 2);
+    }
+  }
+}
+
+function main() -> i32 {
+  const fib_result = fibonacci(6);
+  const fact_result = factorial(5);
+  const max_result = max(10, 20);
+  return max_result;
+}

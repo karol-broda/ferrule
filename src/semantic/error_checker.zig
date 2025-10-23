@@ -133,6 +133,11 @@ pub const ErrorChecker = struct {
             .field_access => |fa| {
                 try self.checkExprErrors(fa.object, current_domain);
             },
+            .array_literal => |al| {
+                for (al.elements) |elem| {
+                    try self.checkExprErrors(elem, current_domain);
+                }
+            },
             .ok => |ok_expr| {
                 try self.checkExprErrors(ok_expr, current_domain);
             },
