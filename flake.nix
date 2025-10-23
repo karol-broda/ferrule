@@ -1,6 +1,5 @@
 {
   description = "zig devshell flake";
-
   inputs = {
     nixpkgs = {
       url = "github:NixOS/nixpkgs/nixos-25.05";
@@ -9,32 +8,43 @@
       url = "github:nixos/nixpkgs/nixos-unstable";
     };
   };
-
   outputs = { self, nixpkgs, nixpkgs-unstable }:
     let
       mkShellFor = system:
         let
-          pkgs = nixpkgs.legacyPackages.${system};
           pkgs-unstable = nixpkgs-unstable.legacyPackages.${system};
+          llvmPackages = pkgs-unstable.llvmPackages_19;
+          # override stdenv to use gcc/libstdc++ instead of clang/libc++
+          # this matches how the llvm libraries are built
+          gccStdenv = pkgs-unstable.overrideCC pkgs-unstable.stdenv pkgs-unstable.gcc;
         in
-        pkgs.mkShell {
-          packages = [
+        gccStdenv.mkDerivation {
+          name = "zig-llvm-devshell";
+
+          buildInputs = [
             pkgs-unstable.zig
             pkgs-unstable.bun
-            pkgs-unstable.llvmPackages_18.llvm
-            pkgs-unstable.llvmPackages_18.clang
+            llvmPackages.llvm
+            llvmPackages.libllvm
+            llvmPackages.clang
+            pkgs-unstable.gcc.cc.lib
+            pkgs-unstable.ncurses
+            pkgs-unstable.zlib
           ];
 
           shellHook = ''
+            export LLVM_SYS_180_PREFIX="${llvmPackages.llvm.dev}"
+            export LLVM_LIBDIR="${llvmPackages.libllvm.lib}/lib"
             if [ -n "$PS1" ]; then
               echo "zig: $(zig --version)"
               echo "llvm: $(llvm-config --version)"
+              echo "clang: $(clang --version | head -n1)"
+              echo "LLVM_LIBDIR: $LLVM_LIBDIR"
             fi
           '';
         };
     in
     {
-      # explicit nested outputs per system
       devShells.x86_64-linux.default = mkShellFor "x86_64-linux";
       devShells.aarch64-linux.default = mkShellFor "aarch64-linux";
       devShells.x86_64-darwin.default = mkShellFor "x86_64-darwin";
