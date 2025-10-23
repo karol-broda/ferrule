@@ -28,11 +28,11 @@ function count_positives() -> i32 {
 }
 
 function main() -> i32 {
-    // 15
+  // 15
   const sum_result = sum_array();
-    // 120
+  // 120
   const product_result = product_array();
-    // 3
+  // 3
   const positive_count = count_positives();
   
   // 138

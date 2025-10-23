@@ -149,6 +149,9 @@ export const custom_tasks: Array<Task, 2> = [
 ];
 ```
 
+> [!NOTE]
+> `build.fe` declares a separate **build-time package** (typically named `build`) that runs in the build context with access to build system APIs. It's a distinct namespace from your main project package.
+
 Enable in `Package.fe`:
 
 ```ferrule

@@ -67,13 +67,18 @@ asm, component
 - signed: `i8 i16 i32 i64 i128`
 - unsigned: `u8 u16 u32 u64 u128 usize`
 - floats: `f16 f32 f64`
-- other: `Bool`, `Char`, `String`, `Bytes`, `Unit` (zero-size)
+- other: `Bool`, `Char`, `Unit` (zero-size)
+
+> [!NOTE]
+> `String` and `Bytes` are region-allocated managed types (see §2.2), not scalars.
 
 ### 2.2 Compound & Parametric Types
 
 - **arrays:** `Array<T, n>` (fixed length)
 - **vectors:** `Vector<T, n>` (simd-aware)
 - **views (fat pointers):** `View<T>` and `View<mut T>` (ptr + len + region id)
+- **strings:** `String` (immutable UTF-8 view); `View<mut u8>` for mutable byte manipulation
+- **bytes:** `Bytes` (immutable byte view); `View<mut u8>` for mutation
 - **records:** `{ field: Type, ... }`
 - **closed unions (discriminated):**
 
@@ -81,8 +86,24 @@ asm, component
   type ParseError = | InvalidByte { index: u32 } | Truncated { expected: u32, actual: u32 };
   ```
 
+- **results (built-in):**
+
+  ```ferrule
+  type Result<T, E> = | ok { value: T } | err { error: E };
+  // ok value and err Variant { ... } are sugar for constructing this union
+  ```
+
+- **maybe (built-in):**
+
+  ```ferrule
+  type Maybe<T> = | Some { value: T } | None;
+  // T? is sugar for Maybe<T>
+  // null literal is equivalent to None
+  const x: u32? = Some { value: 42 };
+  const y: u32? = None;  // or: = null;
+  ```
+
 - **intersections:** `A & B` (structural protocols + nominal roles)
-- **nullable:** postfix `?` (alias of `Maybe<T>`). requires explicit checks; no optional chaining.
 - **refinements:** `type Port = u16 where self >= 1 && self <= 65535;`
 - **type-level naturals:** `Nat` with arithmetic in bounds/shape expressions.
 - **mapped / conditional:**
@@ -91,6 +112,9 @@ asm, component
   type Readonly<T> = map T { K => { readonly: true, type: T[K] } };
   type Jsonable<T> = if T is (String | Number | Bool | Null | Array<Jsonable<any>> | Map<String, Jsonable<any>>) then T else Never;
   ```
+
+> [!NOTE]
+> **String internals:** `String` is a managed view over UTF-8 bytes with region binding `(ptr, len, region_id)` and UTF-8 validity guaranteed by construction. Strings are immutable. To modify string data: (1) copy to a new `View<mut u8>` buffer in a region, (2) modify the buffer, (3) validate and construct a new String via `string.from_utf8(view)` which returns `Result<String, Utf8Error>`.
 
 ### 2.3 Roles & Protocols
 
@@ -115,8 +139,9 @@ counter = counter + 1;
 
 function bump(inout x: u32) -> Unit { x = x + 1; }
 
-const buf: View<mut u8> = region.heap().alloc<u8>(4096);
-defer region.heap().dispose(); // deterministic, non-throwing
+const heap = region.heap();
+const buf: View<mut u8> = heap.alloc<u8>(4096);
+defer heap.dispose();
 ```
 
 - **default binding:** `const` (immutable).
@@ -137,6 +162,9 @@ function name(params...) -> ReturnType [error ErrorDomain]? effects [effect1, ef
 - **effects** enumerate potential side effects; absence means pure/suspend-free.
 - **error** clause declares typed failure (see §6). If omitted and `use error` is in scope, the module default applies.
 
+> [!NOTE]
+> **Effects and function types:** Effects are **part of the function's type signature**. The effect checker validates that called functions' effects are subsets of the caller's effects at each call site. Think of effects like Rust lifetimes: checked statically but erased at runtime.
+
 ### 4.2 Effects (standard set in α1)
 
 `alloc, cpu, fs, net, time, rng, atomics, simd, io, ffi`
@@ -144,8 +172,12 @@ function name(params...) -> ReturnType [error ErrorDomain]? effects [effect1, ef
 - **rules:**
 
   - a function may only perform effects it declares.
+  - functions with `error E` clauses implicitly have fallibility as an effect.
   - async/suspension is permitted if an appropriate effect exists (`net`, `time`, `io`, etc.).
-  - effects compose; callers are not “colored”.
+  - at call sites, the effect checker validates that required effects are available.
+
+> [!NOTE]
+> Functions that can fail (have `error E` clause) are not considered pure, even if they have no explicit `effects [...]` declaration. A truly pure function has no error clause and no effects.
 
 ---
 
@@ -159,6 +191,7 @@ if flag === true { ... } else { ... }        // explicit booleans only
 
 - **no implicit truthiness.** comparisons use `===` / `!==` (strict).
 - numerical comparisons use `< <= > >=`.
+- **boolean literals:** `true` and `false` (lowercase)
 
 ### 5.2 Loops
 
@@ -204,11 +237,15 @@ domain IoError {
 
 ### 6.3 Construction & Propagation Sugar
 
-- `ok value` — wrap success.
-- `err Variant { ... }` — construct error.
-- `check expr [with { frame... }]` — unwrap or return error, optionally adding context.
+- `ok value` — wrap success value in `Result` (only valid in functions with `error E`).
+- `err Variant { ... }` — construct error (only valid in functions with `error E`).
+- `check expr` — unwrap `Result` or return error immediately (no additional context).
+- `check expr with { frame... }` — unwrap or return error, adding context frames.
 - `ensure condition else err Variant { ... }` — guard pattern, early error.
 - `map_error expr using (e => NewError)` — adapt foreign domain, preserving frames.
+
+> [!IMPORTANT]
+> Using `ok` or `err` in a function without an `error E` clause is a compile error. If your function cannot fail, omit the error clause and return values directly.
 
 ```ferrule
 use error IoError;
@@ -246,13 +283,16 @@ function load_config(p: Path) -> Config error ClientError effects [fs] {
 ### 7.1 Package Header
 
 ```ferrule
-// human-readable package name; content address computed by tooling
+// in .fe source files: package name only (no version)
 package net.http;
 ```
 
 - the **content address** (hash of source + derivation) is computed by build tools, not written in source
 - addresses are stored in `ferrule.lock` and embedded in build artifacts
 - source files use human-readable names; tooling handles address resolution
+
+> [!NOTE]
+> Source files (`.fe`) use `package name;` without version. The `Package.fe` manifest uses `package name : version` to declare the package's version. See [package-management.md](package-management.md) for manifest syntax.
 
 ### 7.2 Imports & Capability Declarations
 
@@ -265,7 +305,8 @@ import mylib.http { get, post } using capability net;
 import store://sha256:e1f4… { io as stdio } using capability fs;
 ```
 
-- an `import ... using capability X;` declares that resolving this import requires ambient capability `X` during build/load
+- an `import ... using capability X;` declares that loading this import requires the **build tool** to have capability permission `X` (capability-gated loading at build time)
+- **at runtime**, capabilities are still passed explicitly as values (no ambient authority)
 - name-based imports are resolved to content addresses via the package manifest and lockfile
 - direct hash imports (`store://sha256:...`) pin to exact versions and bypass name resolution
 
@@ -331,8 +372,12 @@ dependencies = []
 ### 8.1 Regions
 
 - **constructors:** `region.heap()`, `region.arena(bytes)`, `region.device(id)`, `region.shared()`
-- **lifetime:** deterministic; `dispose()` returns a status event (non-throwing).
+  - each call to `region.heap()` creates a **new independent region**
+- **lifetime:** deterministic; `dispose()` returns `Unit` (deterministic, never fails).
 - **transfer:** explicit functions move objects/views between regions.
+
+> [!TIP]
+> **Region + View Pattern:** When returning a view, either (1) return the owning region alongside it, (2) copy to an outer region, or (3) document that the caller must not dispose the region until done with the view.
 
 ### 8.2 Views
 
@@ -342,7 +387,7 @@ dependencies = []
 
 ```ferrule
 const arena = region.arena(1 << 20);
-const buf: View<mut u8> = view.make<u8>(arena, count = 4096);
+const buf: View<mut u8> = arena.alloc<u8>(4096);
 defer arena.dispose();
 ```
 
@@ -357,7 +402,9 @@ defer arena.dispose();
 ### 9.1 Colorless Async via Effects
 
 - suspensions are allowed when effects include `net`, `io`, or `time`.
-- function shape is unchanged; `check/err` work the same.
+- effects are part of function types but erased at runtime.
+- higher-order functions propagate the effects of their parameter functions.
+- function shape is unchanged; `check/err` work the same across sync and async.
 
 ```ferrule
 function fetch(url: Url, deadline: Time) -> Response error ClientError effects [net, time] {
@@ -392,6 +439,9 @@ function get_many(urls: View<Url>, deadline: Time) -> View<Response> error Clien
   });
 }
 ```
+
+> [!NOTE]
+> `task.scope` takes a lambda returning `Result<T, E>` and automatically unwraps it. If the lambda returns `ok v`, the scope evaluates to `v`. If it returns `err e`, the error propagates to the calling function.
 
 ### 9.3 Deterministic Scheduler (Tests)
 
@@ -455,28 +505,24 @@ with context { request_id: rid, user_id: uid } in {
 
 ### 13.1 Package Manifest & Derivation
 
-A package's `Package.fe` manifest declares both metadata and build derivation:
+A package's `Package.fe` manifest declares both metadata and build derivation (see [package-management.md](package-management.md) for full syntax):
 
-```toml
-# Package.fe - human-readable manifest
-name = "stdlib"
-version = "1.0.0"
+```ferrule
+package stdlib;
 
-[derivation]
-compiler = "ferrulec@1.0.0"
-sysroot = "musl@1.2.5"
-target = "x86_64-linux-musl"
+// dependencies resolved via ferrule.lock
+require core ~> 2.1.0
 
-[derivation.features]
-simd = true
-lto = "thin"
+target x86_64-linux-musl {
+  optimize = release
+  features = [simd, lto]
+  policy = { network: false, capabilities: [fs] }
+}
 
-[derivation.policy]
-network = false
-capabilities = ["fs"]
-
-[dependencies]
-# human-readable deps resolved via ferrule.lock
+build {
+  entry = src/lib.fe
+  output = lib/stdlib
+}
 ```
 
 ### 13.2 Content Address Computation
@@ -492,10 +538,13 @@ Imports can override derivation parameters, producing a different content addres
 
 ```ferrule
 // resolve stdlib with modified features
-import stdlib { io } with { features = { simd: false } };
+import stdlib { io } with { features: { simd: false } };
 ```
 
 The lockfile records both the original and mutated addresses.
+
+> [!NOTE]
+> The `with { ... }` clause modifies the imported package's build configuration, creating a variant. The content address changes because the derivation is part of the address computation.
 
 ---
 
@@ -543,7 +592,7 @@ function rdtsc() -> u64 effects [cpu] {
 
 ```ferrule
 const raw: *u8? = getenv(name);
-if raw == null { return err NotFound { path: name_as_path(name) } }
+if raw === null { return err NotFound { path: name_as_path(name) } }
 ```
 
 ---
@@ -714,9 +763,13 @@ Module       := PackageDecl { ImportDecl } { TopDecl }
 
 PackageDecl  := "package" QualifiedName ";"
 QualifiedName:= Identifier { "." Identifier }
-ImportDecl   := "import" ImportSource "{" ImportList "}" [ "using" "capability" Identifier ] ";"
+ImportDecl   := "import" ImportSource "{" ImportList "}"
+                [ "with" "{" SettingList "}" ]
+                [ "using" "capability" Identifier ] ";"
 ImportSource := QualifiedName | "store://" Hash
 ImportList   := Identifier { "," Identifier } [ "as" Identifier ]
+SettingList  := Setting { "," Setting }
+Setting      := Identifier ":" Value
 
 TopDecl      := TypeDecl | RoleDecl | DomainDecl | DerivationDecl | FunctionDecl | CapabilityDecl
 
@@ -771,7 +824,8 @@ Primary      := Literal | Identifier | "(" Expr ")"
 Postfix      := "(" ArgList? ")" | "." Identifier
 ArgList      := Expr { "," Expr }
 
-Literal      := Number | StringLit | BoolLit | BytesLit | "null"
+Literal      := Number | StringLit | BoolLit | BytesLit | "null" | "Unit"
+BoolLit      := "true" | "false"
 ```
 
 > [!NOTE]
@@ -897,23 +951,50 @@ function f(x: T) -> U error E effects [fs, time] { ... }
 (T) -> U error E effects [fs, time]
 ```
 
-This type can be used for higher-order params:
+Parameter functions carry their own effect sets, and these propagate to the caller:
+
+```ferrule
+// map is effect-polymorphic: callers must have [alloc] plus any effects that f has
+function map<T, U>(arr: View<T>, f: (T) -> U) -> View<U> effects [alloc] {
+  // when map calls f(), the combined effects are [alloc, ...f's effects]
+  // caller of map must have all required effects
+}
+
+// example: higher-order function with capability propagation
+// map_with_cap explicitly threads capabilities through to the mapping function
+function map_with_cap<T, U, C>(arr: View<T>, f: (T, cap c: C) -> U, cap c: C) -> View<U> effects [alloc] {
+  // map implementation that passes capability to each invocation of f
+  // ...
+}
+
+function process_files(paths: View<Path>, cap fs: Fs) -> View<String> error IoError effects [fs, alloc] {
+  // this is valid: caller has both [fs] and [alloc]
+  return map_with_cap(paths, (p, cap fs: Fs) => {
+    const content = check fs.read_all_text(p);  // fs passed explicitly
+    return content;
+  }, fs);  // pass fs capability to map_with_cap
+}
+```
+
+Higher-order function example:
 
 ```ferrule
 function retry<T, E1, E2>(
   attempts: u32,
   op: (Unit) -> T error E1 effects [net, time],
-  adapt: (E1) -> E2
+  adapt: (E1) -> E2,
+  default_error: E1
 ) -> T error E2 effects [net, time] {
   var i: u32 = 0;
+  var last_error: E1 = default_error;
   while i < attempts {
     const r = op(());
     match r {
       ok v  -> return ok v;
-      err e -> { i = i + 1; if i === attempts { return err adapt(e) } }
+      err e -> { last_error = e; i = i + 1; }
     }
   }
-  return err adapt(/* unreachable sentinel by typing */);
+  return err adapt(last_error);
 }
 ```
 
@@ -931,11 +1012,13 @@ If not satisfied, the compiler diagnoses with the missing effects.
 
 - **within a module**, the compiler may infer a function's effect set from its body when omitted.
 - **public symbols** (exported from a package/module, or crossing c/wasm component boundaries) **must** spell their effect sets explicitly. toolchains reject exports with inferred effects.
+- **validation:** for public functions with explicit effects, the compiler verifies that declared effects are a superset of inferred effects. mismatch is a compile error.
 
 ### 4.5 Async Suspension
 
 - a function may suspend **only if** `effects` includes one of: `net`, `io`, `time`, or a user-defined effect marked as _suspending_ by tooling.
 - suspension points are recorded in debug capsules for profilers.
+- effect checks happen at call sites independently of type-checking, enabling colorless composition.
 
 ### 4.6 Capabilities vs Effects
 
@@ -959,6 +1042,27 @@ function read_all(p: Path, cap fs: Fs) -> Bytes error IoError effects [fs] {
 
 - parameter function types carry their own effect sets.
 - **composition rule**: caller's effects must include the **union** of any invoked parameter-function effects.
+- **capability passing**: if a parameter function requires capabilities (e.g., `fs`), they must be passed explicitly as parameters. closures capture capabilities explicitly in their parameter lists—there is no ambient authority.
+
+```ferrule
+function retry<T, E>(
+  attempts: u32,
+  op: (cap fs: Fs) -> T error E effects [fs],  // op receives fs explicitly
+  cap fs: Fs,
+  default_error: E
+) -> T error E effects [fs] {
+  var i: u32 = 0;
+  var last_error: E = default_error;
+  while i < attempts {
+    const r = op(fs);  // pass capability explicitly
+    match r {
+      ok v  -> return ok v;
+      err e -> { last_error = e; i = i + 1; }
+    }
+  }
+  return err last_error;
+}
+```
 
 ### 4.8 Effect Polymorphism (Informative)
 
@@ -986,6 +1090,7 @@ function map_ok<T, U, E>(r: Result<T, E>, f: (T) -> U) -> Result<U, E> {
 - **regions** group allocations under a single lifetime; disposing a region frees everything inside it deterministically.
 - **views** are fat pointers `(ptr, len, regionId)` with optional mutability (`View<T>` vs `View<mut T>`).
 - there is **no garbage collector**; safety is achieved via regions, views, and capsules.
+- each call to `region.heap()` creates a **new independent region**; there is no global singleton heap.
 
 ### 8.1 Region Kinds (α1)
 
@@ -995,11 +1100,11 @@ function map_ok<T, U, E>(r: Result<T, E>, f: (T) -> U) -> Result<U, E> {
 - `region.shared()` — multiple threads may access; requires `atomics` for mutation.
 
 > [!NOTE]
-> Regions are values; they can be passed, stored, and disposed. Disposing returns a **status event** (never throws).
+> Regions are values; they can be passed, stored, and disposed. Disposing returns `Unit` (never fails).
 
 ```ferrule
 const arena = region.arena(1 << 20);
-const buf: View<mut u8> = view.make<u8>(arena, count = 4096);
+const buf: View<mut u8> = arena.alloc<u8>(4096);
 defer arena.dispose();
 ```
 
@@ -1069,13 +1174,16 @@ const moved: View<mut u8> = view.move(buf, to = dst);
 
   - logically frees all allocations in the region;
   - runs deterministic **destructors** for capsule values registered with the region;
-  - returns a **status event** (for tracing) but **never** throws or return an error value.
+  - returns `Unit` (**never** fails; errors during finalization are logged but don't propagate).
 
 - disposing a region **invalidates** all views bound to it; further access traps.
 
+> [!NOTE]
+> Finalizer errors are logged to the debugging/observability subsystem but do not affect control flow. `dispose()` always succeeds from the caller's perspective.
+
 ```ferrule
 const r = region.arena(1024);
-defer r.dispose(); // status is recorded to the observability channel
+defer r.dispose();
 ```
 
 ### 8.9 Capsules (Unique Resources)
@@ -1224,12 +1332,16 @@ function with_timeout<T, E>(
 ## 8.y Worked Examples (Region Transfer & Memory)
 
 ```ferrule
-// move from arena to heap
-function clone_to_heap(src: View<u8>) -> View<u8> effects [alloc] {
+// copy to caller's region (caller provides destination)
+function clone_to_region(src: View<u8>, dst_region: Region) -> View<u8> effects [alloc] {
+  return view.copy(src, to = dst_region);
+}
+
+// return region along with view (caller owns disposal)
+function clone_with_region(src: View<u8>) -> { data: View<u8>, region: Region } effects [alloc] {
   const heap = region.heap();
   const dst  = view.copy(src, to = heap);
-  defer heap.dispose(); // or return heap and let caller own lifetime
-  return dst;
+  return { data: dst, region: heap };
 }
 
 // pin for ffi call
