@@ -1,0 +1,25 @@
+{
+  "name": "ferrule-workspace",
+  "private": true,
+  "workspaces": [
+    "tooling/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "compile": "turbo run compile",
+    "dev": "turbo run dev",
+    "clean": "turbo run clean",
+    "vscode:compile": "turbo run compile --filter=ferrule",
+    "vscode:watch": "turbo run watch --filter=ferrule",
+    "vscode:package": "cd tooling/vscode && bun run package",
+    "grammar:publish": "cd tooling/grammar && npm publish --access public",
+    "shiki:build": "turbo run build --filter=@ferrule/shiki",
+    "shiki:dev": "turbo run dev --filter=@ferrule/shiki",
+    "shiki:publish": "cd tooling/shiki && bun publish --access public",
+    "publish:all": "bun run grammar:publish && bun run shiki:publish"
+  },
+  "packageManager": "bun@1.3.0",
+  "devDependencies": {
+    "turbo": "2.5.8"
+  }
+}

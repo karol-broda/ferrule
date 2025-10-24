@@ -1,0 +1,51 @@
+{
+  "name": "@ferrule/shiki",
+  "version": "0.1.2",
+  "description": "Shiki syntax highlighting support for Ferrule language",
+  "author": "Karol Broda",
+  "license": "GPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/karol-broda/ferrule.git",
+    "directory": "tooling/shiki"
+  },
+  "homepage": "https://github.com/karol-broda/ferrule",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "bun run build"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "ferrule",
+    "shiki",
+    "syntax-highlighting",
+    "textmate",
+    "code-highlighting"
+  ],
+  "dependencies": {
+    "@ferrule/grammar": "^0.1.0",
+    "shiki": "^1.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "typescript": "^5.0.0"
+  }
+}
+

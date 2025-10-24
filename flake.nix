@@ -12,6 +12,7 @@
     let
       mkShellFor = system:
         let
+          pkgs = nixpkgs.legacyPackages.${system};
           pkgs-unstable = nixpkgs-unstable.legacyPackages.${system};
           llvmPackages = pkgs-unstable.llvmPackages_19;
           # override stdenv to use gcc/libstdc++ instead of clang/libc++
@@ -30,6 +31,7 @@
             pkgs-unstable.gcc.cc.lib
             pkgs-unstable.ncurses
             pkgs-unstable.zlib
+            pkgs.nodejs_22
           ];
 
           shellHook = ''

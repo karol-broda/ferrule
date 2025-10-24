@@ -1,0 +1,35 @@
+{
+  "name": "@ferrule/grammar",
+  "version": "0.1.0",
+  "description": "TextMate grammar for Ferrule language",
+  "author": "Karol Broda",
+  "license": "GPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/karol-broda/ferrule.git",
+    "directory": "tooling/grammar"
+  },
+  "homepage": "https://github.com/karol-broda/ferrule",
+  "type": "module",
+  "main": "./ferrule.tmLanguage.json",
+  "exports": {
+    ".": "./ferrule.tmLanguage.json"
+  },
+  "files": [
+    "ferrule.tmLanguage.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "echo 'Grammar package ready'"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "ferrule",
+    "grammar",
+    "textmate",
+    "syntax"
+  ]
+}
+

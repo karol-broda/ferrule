@@ -1,3 +1,6 @@
 zig-out
 .zig-cache
+dist/
+node_modules
+.turbo
 out/
