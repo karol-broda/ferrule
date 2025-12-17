@@ -1,5 +1,5 @@
 import type { LanguageRegistration } from 'shiki';
-import grammar from '@ferrule/grammar';
+import grammar from '@ferrule/grammar' with {type: 'json'};
 
 export const ferruleLanguage: LanguageRegistration = {
   ...grammar,

@@ -14,7 +14,7 @@
         let
           pkgs = nixpkgs.legacyPackages.${system};
           pkgs-unstable = nixpkgs-unstable.legacyPackages.${system};
-          llvmPackages = pkgs-unstable.llvmPackages_19;
+          llvmPackages = pkgs-unstable.llvmPackages_21;
           # override stdenv to use gcc/libstdc++ instead of clang/libc++
           # this matches how the llvm libraries are built
           gccStdenv = pkgs-unstable.overrideCC pkgs-unstable.stdenv pkgs-unstable.gcc;
@@ -38,7 +38,7 @@
             export LLVM_SYS_180_PREFIX="${llvmPackages.llvm.dev}"
             export LLVM_LIBDIR="${llvmPackages.libllvm.lib}/lib"
             if [ -n "$PS1" ]; then
-              echo "zig: $(zig --version)"
+              echo "zig: $(zig version)"
               echo "llvm: $(llvm-config --version)"
               echo "clang: $(clang --version | head -n1)"
               echo "LLVM_LIBDIR: $LLVM_LIBDIR"
