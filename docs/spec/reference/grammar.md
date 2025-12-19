@@ -78,8 +78,12 @@ TypeDecl     := "type" Identifier { "<" TypeParams ">" }? "=" TypeExpr ";"
 
 ErrorDecl    := "error" Identifier { "{" FieldList "}" }? ";"
 
-DomainDecl   := "domain" Identifier "=" ErrorUnion ";"
+DomainDecl   := "domain" Identifier "=" ErrorUnion ";"    /* union syntax */
+             | "domain" Identifier "{" { DomainVariant }* "}"  /* inline variant syntax */
+
 ErrorUnion   := Identifier { "|" Identifier }*
+
+DomainVariant := Identifier { "{" FieldList "}" }?
 
 ConstDecl    := "const" QualifiedIdent ":" TypeExpr "=" Expr ";"
 QualifiedIdent := Identifier { "." Identifier }?
@@ -293,16 +297,16 @@ ClobberList  := { Identifier { "," Identifier }* }?
 ```ebnf
 InfixOp      := "||"                        /* logical or */
              | "&&"                         /* logical and */
-             | "==" | "!=" | "<" | "<=" | ">" | ">="  /* comparison */
+             | "==" | "!="                  /* equality (single ==, no ===) */
+             | "<" | "<=" | ">" | ">="      /* comparison */
              | "|"                          /* bitwise or */
              | "^"                          /* bitwise xor */
              | "&"                          /* bitwise and */
              | "<<" | ">>"                  /* shift */
-             | "+" | "-"                    /* additive */
+             | "++" | "+" | "-"             /* additive & string concat */
              | "*" | "/" | "%"              /* multiplicative */
-             | "++"                         /* string concat */
 
 PrefixOp     := "!" | "-" | "~"
 ```
 
-See [operators.md](operators.md) for detailed precedence table.
+**Note:** Ferrule uses `==` for equality (not `===`). See [operators.md](operators.md) for detailed precedence table.

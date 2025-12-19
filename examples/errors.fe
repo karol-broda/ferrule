@@ -20,3 +20,30 @@ function read_file(path: String, cap fs: Fs) -> String error IoError effects [fs
   return ok data;
 }
 
+function main() {
+  const result = parse_number("42");
+  if result.isErr() {
+    const error = result.unwrapErr();
+    switch error {
+      ParseError.InvalidByte { index } => {
+        println("Invalid byte at index {}", index);
+      }
+      ParseError.Truncated { expected, actual } => {
+        println("Truncated: expected {}, actual {}", expected, actual);
+      }
+    }
+  }
+
+  const file = read_file("example.txt", fs);
+  if file.isErr() {
+    const error = file.unwrapErr();
+    switch error {
+      IoError.NotFound { path } => {
+        println("File not found: {}", path);
+      }
+      IoError.Denied { path } => {
+        println("Access denied for file: {}", path);
+      }
+    }
+  }
+}

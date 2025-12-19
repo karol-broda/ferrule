@@ -1,98 +1,111 @@
 current state:
 ```bash
-➜ ./zig-out/bin/ferrule examples/hello.fe
-=== compiling examples/hello.fe ===
-
-lexed 114 tokens:
-    1:  1      package_kw 'package'
-    1:  9      identifier 'example'
-    1: 16             dot '.'
-    1: 17      identifier 'hello'
-    1: 22       semicolon ';'
-    3:  1       domain_kw 'domain'
-    3:  8      identifier 'IoError'
-    3: 16          lbrace '{'
-    4:  3      identifier 'NotFound'
-    4: 12          lbrace '{'
-    4: 14      identifier 'path'
-    4: 18           colon ':'
-    4: 20      identifier 'String'
-    4: 27          rbrace '}'
-    5:  3      identifier 'Denied'
-    5: 10          lbrace '{'
-    5: 12      identifier 'path'
-    5: 16           colon ':'
-    5: 18      identifier 'String'
-    5: 25          rbrace '}'
-    6:  3      identifier 'Interrupted'
-    6: 15          lbrace '{'
-    6: 17      identifier 'op'
-    6: 19           colon ':'
-    6: 21      identifier 'String'
-    6: 28          rbrace '}'
-    7:  1          rbrace '}'
-    9:  1          use_kw 'use'
-    9:  5        error_kw 'error'
-    9: 11      identifier 'IoError'
-    9: 18       semicolon ';'
-   11:  1     function_kw 'function'
-   11: 10      identifier 'add'
-   11: 13          lparen '('
-   11: 14      identifier 'x'
-   11: 15           colon ':'
-   11: 17      identifier 'i32'
-   11: 20           comma ','
-   11: 22      identifier 'y'
-   11: 23           colon ':'
-   11: 25      identifier 'i32'
-   11: 28          rparen ')'
-   11: 30           arrow '->'
-   11: 33      identifier 'i32'
-   11: 37          lbrace '{'
-   12:  3       return_kw 'return'
-   12: 10      identifier 'x'
-   12: 12            plus '+'
-   12: 14      identifier 'y'
-   12: 15       semicolon ';'
-  ... and 64 more tokens
-
+➜ ./zig-out/bin/ferrule examples/fizzbuzz.fe
+=== compiling examples/fizzbuzz.fe ===
 parsed successfully
-
 === semantic analysis ===
+semantic analysis completed: 1 statements typed
+=== code generation ===
+=== compilation complete ===
 
+➜ ./out/fizzbuzz
+fizzbuzz from 1 to 30:
 
-=== semantic errors ===
+1
+2
+fizz
+4
+buzz
+...
+fizzbuzz
 
-error: unknown type 'tring'
-  ┌─ examples/hello.fe:15:22
-  │
- 15 │ function greet(name: tring) -> tring {
-  │                      ^^^^^
+done
+```
 
-error: unknown type 'tring'
-  ┌─ examples/hello.fe:15:32
-  │
- 15 │ function greet(name: tring) -> tring {
-  │                                ^^^^^
+## features
 
-error: unknown type 'tring'
-  ┌─ examples/hello.fe:15:22
-  │
- 15 │ function greet(name: tring) -> tring {
-  │                      ^^^^^
+### i/o builtins
 
-error: return type mismatch: expected (), got String
-  ┌─ examples/hello.fe:17:3
-  │
- 17 │   return greeting;
-  │   ^^^^^^
+| function | type |
+|----------|------|
+| `println(s: String)` | `() effects [io]` |
+| `print(s: String)` | `() effects [io]` |
+| `print_i32(v: i32)` | `() effects [io]` |
+| `print_i64(v: i64)` | `() effects [io]` |
+| `print_f64(v: f64)` | `() effects [io]` |
+| `print_bool(v: Bool)` | `() effects [io]` |
+| `print_newline()` | `() effects [io]` |
+| `read_char()` | `i32 effects [io]` |
 
-error: return type mismatch: expected i32, got String
-  ┌─ examples/hello.fe:26:5
-  │
- 26 │     return "0";
-  │     ^^^^^^
+### control flow
 
+- `if cond { } else if cond { } else { }`
+- `while cond { }`
+- `for i in 0..10 { }` (range loops)
+- `for x in array { }` (array iteration)
 
-=== compilation failed ===
+### types
+
+- scalars: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f32`, `f64`, `Bool`
+- `String`, `Array`
+- ranges: `0..10`
+
+### operators
+
+- arithmetic: `+`, `-`, `*`, `/`, `%`
+- comparison: `==`, `!=`, `<`, `>`, `<=`, `>=`
+- logical: `&&`, `||`
+
+## build
+
+```bash
+nix develop --command zig build
+./zig-out/bin/ferrule examples/fizzbuzz.fe
+./out/fizzbuzz
+```
+
+## examples
+
+```ferrule
+// fizzbuzz with for-range
+function main() -> i32 effects [io] {
+  for i in 1..31 {
+    const by3 = i % 3 == 0;
+    const by5 = i % 5 == 0;
+
+    if by3 && by5 {
+      println("fizzbuzz");
+    } else if by3 {
+      println("fizz");
+    } else if by5 {
+      println("buzz");
+    } else {
+      print_i32(i);
+      print_newline();
+    }
+  }
+  return 0;
+}
+```
+
+```ferrule
+// array iteration
+function main() -> i32 effects [io] {
+  const numbers = [1, 2, 3, 4, 5];
+  var sum: i32 = 0;
+  for n in numbers {
+    sum = sum + n;
+  }
+  print_i32(sum); // 15
+  return 0;
+}
+```
+
+```ferrule
+// stdin reading
+function main() -> i32 effects [io] {
+  const c = read_char();
+  print_i32(c); // ascii code
+  return 0;
+}
 ```

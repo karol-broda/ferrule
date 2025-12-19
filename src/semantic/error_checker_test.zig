@@ -40,11 +40,13 @@ test "function with valid error domain should not error" {
 
     const func_decl = ast.FunctionDecl{
         .name = "test_func",
+        .type_params = null,
         .params = &[_]ast.Param{},
-        .return_type = .{ .simple = "()" },
+        .return_type = .{ .simple = .{ .name = "()", .loc = .{ .line = 1, .column = 1 } } },
         .error_domain = "FileError",
         .effects = &[_][]const u8{},
         .body = &[_]ast.Stmt{},
+        .name_loc = .{ .line = 1, .column = 1 },
     };
 
     try checker.checkFunction(func_decl);
@@ -74,11 +76,13 @@ test "function with unknown error domain should error" {
 
     const func_decl = ast.FunctionDecl{
         .name = "test_func",
+        .type_params = null,
         .params = &[_]ast.Param{},
-        .return_type = .{ .simple = "()" },
+        .return_type = .{ .simple = .{ .name = "()", .loc = .{ .line = 1, .column = 1 } } },
         .error_domain = "UnknownDomain",
         .effects = &[_][]const u8{},
         .body = &[_]ast.Stmt{},
+        .name_loc = .{ .line = 1, .column = 1 },
     };
 
     try checker.checkFunction(func_decl);
@@ -122,7 +126,7 @@ test "valid error variant in function body should not error" {
     var err_expr = ast.Expr{
         .err = .{
             .variant = "NotFound",
-            .fields = &[_]ast.Field{},
+            .fields = &[_]ast.FieldAssignment{},
         },
     };
 
@@ -131,11 +135,13 @@ test "valid error variant in function body should not error" {
     };
     const func_decl = ast.FunctionDecl{
         .name = "test_func",
+        .type_params = null,
         .params = &[_]ast.Param{},
-        .return_type = .{ .simple = "()" },
+        .return_type = .{ .simple = .{ .name = "()", .loc = .{ .line = 1, .column = 1 } } },
         .error_domain = "FileError",
         .effects = &[_][]const u8{},
         .body = body_stmts1[0..],
+        .name_loc = .{ .line = 1, .column = 1 },
     };
 
     try checker.checkFunction(func_decl);
@@ -176,23 +182,25 @@ test "invalid error variant should error" {
         "test.fe",
     );
 
-    var err_expr = ast.Expr{
+    var err_expr2 = ast.Expr{
         .err = .{
             .variant = "InvalidVariant",
-            .fields = &[_]ast.Field{},
+            .fields = &[_]ast.FieldAssignment{},
         },
     };
 
     var body_stmts2 = [_]ast.Stmt{
-        .{ .expr_stmt = &err_expr },
+        .{ .expr_stmt = &err_expr2 },
     };
     const func_decl = ast.FunctionDecl{
         .name = "test_func",
+        .type_params = null,
         .params = &[_]ast.Param{},
-        .return_type = .{ .simple = "()" },
+        .return_type = .{ .simple = .{ .name = "()", .loc = .{ .line = 1, .column = 1 } } },
         .error_domain = "FileError",
         .effects = &[_][]const u8{},
         .body = body_stmts2[0..],
+        .name_loc = .{ .line = 1, .column = 1 },
     };
 
     try checker.checkFunction(func_decl);
@@ -233,7 +241,7 @@ test "check expression with valid error should not error" {
         "test.fe",
     );
 
-    var inner_expr = ast.Expr{ .identifier = "result" };
+    var inner_expr = ast.Expr{ .identifier = .{ .name = "result", .loc = .{ .line = 1, .column = 1 } } };
     var check_expr = ast.Expr{
         .check = .{
             .expr = &inner_expr,
@@ -246,11 +254,13 @@ test "check expression with valid error should not error" {
     };
     const func_decl = ast.FunctionDecl{
         .name = "test_func",
+        .type_params = null,
         .params = &[_]ast.Param{},
-        .return_type = .{ .simple = "()" },
+        .return_type = .{ .simple = .{ .name = "()", .loc = .{ .line = 1, .column = 1 } } },
         .error_domain = "FileError",
         .effects = &[_][]const u8{},
         .body = body_stmts3[0..],
+        .name_loc = .{ .line = 1, .column = 1 },
     };
 
     try checker.checkFunction(func_decl);
@@ -297,7 +307,7 @@ test "ensure expression with valid error should not error" {
             .condition = &condition_expr,
             .error_expr = .{
                 .variant = "ValidationFailed",
-                .fields = &[_]ast.Field{},
+                .fields = &[_]ast.FieldAssignment{},
             },
         },
     };
@@ -307,11 +317,13 @@ test "ensure expression with valid error should not error" {
     };
     const func_decl = ast.FunctionDecl{
         .name = "test_func",
+        .type_params = null,
         .params = &[_]ast.Param{},
-        .return_type = .{ .simple = "()" },
+        .return_type = .{ .simple = .{ .name = "()", .loc = .{ .line = 1, .column = 1 } } },
         .error_domain = "ValidationError",
         .effects = &[_][]const u8{},
         .body = body_stmts4[0..],
+        .name_loc = .{ .line = 1, .column = 1 },
     };
 
     try checker.checkFunction(func_decl);
@@ -356,7 +368,7 @@ test "errors in nested if statement should be checked" {
     var err_expr = ast.Expr{
         .err = .{
             .variant = "InvalidVariant",
-            .fields = &[_]ast.Field{},
+            .fields = &[_]ast.FieldAssignment{},
         },
     };
 
@@ -374,11 +386,13 @@ test "errors in nested if statement should be checked" {
     };
     const func_decl = ast.FunctionDecl{
         .name = "test_func",
+        .type_params = null,
         .params = &[_]ast.Param{},
-        .return_type = .{ .simple = "()" },
+        .return_type = .{ .simple = .{ .name = "()", .loc = .{ .line = 1, .column = 1 } } },
         .error_domain = "TestError",
         .effects = &[_][]const u8{},
         .body = body_stmts5[0..],
+        .name_loc = .{ .line = 1, .column = 1 },
     };
 
     try checker.checkFunction(func_decl);

@@ -25,7 +25,7 @@ test "match with wildcard should be considered exhaustive" {
         "test.fe",
     );
 
-    var value = ast.Expr{ .identifier = "x" };
+    var value = ast.Expr{ .identifier = .{ .name = "x", .loc = .{ .line = 1, .column = 1 } } };
     var body = ast.Expr{ .number = "42" };
 
     var arms1 = [_]ast.MatchArm{
@@ -64,7 +64,7 @@ test "match without wildcard should warn" {
         "test.fe",
     );
 
-    var value = ast.Expr{ .identifier = "x" };
+    var value = ast.Expr{ .identifier = .{ .name = "x", .loc = .{ .line = 1, .column = 1 } } };
     var body = ast.Expr{ .number = "42" };
 
     var arms2 = [_]ast.MatchArm{
@@ -103,7 +103,7 @@ test "match with identifier pattern should be exhaustive" {
         "test.fe",
     );
 
-    var value = ast.Expr{ .identifier = "x" };
+    var value = ast.Expr{ .identifier = .{ .name = "x", .loc = .{ .line = 1, .column = 1 } } };
     var body = ast.Expr{ .number = "42" };
 
     var arms3 = [_]ast.MatchArm{
@@ -142,7 +142,7 @@ test "match expression without wildcard should warn" {
         "test.fe",
     );
 
-    var value = ast.Expr{ .identifier = "x" };
+    var value = ast.Expr{ .identifier = .{ .name = "x", .loc = .{ .line = 1, .column = 1 } } };
     var body1 = ast.Expr{ .number = "1" };
 
     var arms4 = [_]ast.MatchArm{
@@ -342,7 +342,7 @@ test "nested match statements should be checked" {
         "test.fe",
     );
 
-    var inner_value = ast.Expr{ .identifier = "y" };
+    var inner_value = ast.Expr{ .identifier = .{ .name = "y", .loc = .{ .line = 1, .column = 1 } } };
     var inner_body = ast.Expr{ .number = "1" };
 
     var inner_arms = [_]ast.MatchArm{
@@ -363,11 +363,13 @@ test "nested match statements should be checked" {
     };
     const func_decl = ast.FunctionDecl{
         .name = "test",
+        .type_params = null,
         .params = &[_]ast.Param{},
-        .return_type = .{ .simple = "()" },
+        .return_type = .{ .simple = .{ .name = "()", .loc = .{ .line = 1, .column = 1 } } },
         .error_domain = null,
         .effects = &[_][]const u8{},
         .body = func_body[0..],
+        .name_loc = .{ .line = 1, .column = 1 },
     };
 
     try checker.checkStmt(.{ .function_decl = func_decl });

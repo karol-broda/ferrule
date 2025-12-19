@@ -8,9 +8,15 @@
       url = "github:nixos/nixpkgs/nixos-unstable";
     };
   };
-  outputs = { self, nixpkgs, nixpkgs-unstable }:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      nixpkgs-unstable,
+    }:
     let
-      mkShellFor = system:
+      mkShellFor =
+        system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
           pkgs-unstable = nixpkgs-unstable.legacyPackages.${system};
@@ -37,6 +43,12 @@
           shellHook = ''
             export LLVM_SYS_180_PREFIX="${llvmPackages.llvm.dev}"
             export LLVM_LIBDIR="${llvmPackages.libllvm.lib}/lib"
+            # Filter out -fmacro-prefix-map flags that Zig doesn't understand
+            if [ -n "$NIX_CFLAGS_COMPILE" ]; then
+              export NIX_CFLAGS_COMPILE=$(echo "$NIX_CFLAGS_COMPILE" | sed 's/-fmacro-prefix-map=[^ ]*//g')
+            fi
+            # Add library paths for LLVM and ncurses so Zig can find them
+            export LIBRARY_PATH="${llvmPackages.libllvm.lib}/lib:${pkgs-unstable.ncurses}/lib:${pkgs-unstable.zlib}/lib:${pkgs-unstable.gcc.cc.lib}/lib''${LIBRARY_PATH:+:$LIBRARY_PATH}"
             if [ -n "$PS1" ]; then
               echo "zig: $(zig version)"
               echo "llvm: $(llvm-config --version)"
@@ -53,4 +65,3 @@
       devShells.aarch64-darwin.default = mkShellFor "aarch64-darwin";
     };
 }
-

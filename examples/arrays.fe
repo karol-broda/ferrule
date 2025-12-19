@@ -1,0 +1,30 @@
+package example.arrays;
+
+function main() -> i32 effects [io] {
+  println("array test:");
+
+  const numbers: Array<i32, 5> = [1, 2, 3, 4, 5];
+
+  println("iterating with for loop:");
+  for n in numbers {
+    print_i32(n);
+    print_newline();
+  }
+
+  println("sum test:");
+  var sum: i32 = 0;
+  for n in numbers {
+    sum = sum + n;
+  }
+  print("sum = ");
+  print_i32(sum);
+  print_newline();
+
+  if sum == 15 {
+    println("passed!");
+    return 0;
+  } else {
+    println("failed!");
+    return 1;
+  }
+}

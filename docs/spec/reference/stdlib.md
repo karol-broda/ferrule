@@ -27,6 +27,28 @@ See [../errors/propagation.md](../errors/propagation.md).
 
 ---
 
+## Capabilities
+
+Standard capabilities available to programs:
+
+| Capability | Effect | Purpose |
+|------------|--------|---------|
+| `Io` | `io` | stdin, stdout, stderr |
+| `Fs` | `fs` | file system operations |
+| `Net` | `net` | network operations |
+| `Clock` | `time` | time access, sleep |
+| `Rng` | `rng` | randomness |
+
+The entry point receives capabilities from the runtime:
+
+```ferrule
+function main(cap io: Io, cap fs: Fs, cap net: Net, cap clock: Clock) -> Unit {
+  // all authority flows from here
+}
+```
+
+---
+
 ## Regions & Views
 
 ### Region Constructors
@@ -115,6 +137,54 @@ rng.u64()                      // random u64
 rng.range(min, max)            // random in range
 rng.bytes(view)                // fill view with random bytes
 rng.shuffle(view)              // shuffle elements
+```
+
+---
+
+## Standard I/O
+
+Requires `io` effect and `Io` capability.
+
+### stdout
+
+```ferrule
+io.println(message)            // print line to stdout
+io.print(message)              // print without newline
+io.print_i32(value)            // print integer
+io.print_i64(value)            // print 64-bit integer
+io.print_f64(value)            // print float
+io.print_bool(value)           // print boolean
+io.flush()                     // flush stdout buffer
+```
+
+### stderr
+
+```ferrule
+io.eprintln(message)           // print line to stderr
+io.eprint(message)             // print to stderr without newline
+```
+
+### stdin
+
+```ferrule
+io.read_line()                 // read line from stdin -> String?
+io.read_all()                  // read all stdin -> Bytes
+io.read(buffer)                // read into buffer -> usize
+```
+
+### Example
+
+```ferrule
+function main(cap io: Io) -> Unit effects [io] {
+  io.println("What is your name?");
+  
+  const name = check io.read_line();
+  io.print("Hello, ");
+  io.print(name);
+  io.println("!");
+  
+  return ok Unit;
+}
 ```
 
 ---

@@ -31,22 +31,51 @@ Standalone errors can be:
 
 ## Error Domains
 
-Domains group related errors:
+Domains group related errors. There are two syntaxes:
+
+### Union Syntax (Preferred)
+
+Reference standalone error types by name:
 
 ```ferrule
 domain IoError = NotFound | Denied | Timeout;
 domain ParseError = ParseFailed | UnexpectedToken;
 ```
 
-Domains are **unions of error types**.
+This is the **preferred** syntax when errors are reused across multiple domains.
+
+### Inline Variant Syntax
+
+Define error variants directly within the domain:
+
+```ferrule
+domain IoError {
+  NotFound { path: Path }
+  Denied { path: Path, reason: String }
+  Timeout { ms: u64 }
+}
+```
+
+Use this syntax for domain-specific errors that won't be reused.
+
+Both syntaxes create **unions of error types**.
 
 ---
 
 ## Domain Composition
 
-Compose domains using union:
+Compose domains using union syntax:
 
 ```ferrule
+// standalone errors
+error NotFound { path: Path }
+error Denied { path: Path }
+error Timeout { ms: u64 }
+error ConnectionRefused { host: String }
+error ParseFailed { line: u32 }
+error UnexpectedToken { token: String }
+
+// domains as unions
 domain IoError = NotFound | Denied;
 domain NetError = Timeout | ConnectionRefused;
 domain ParseError = ParseFailed | UnexpectedToken;
@@ -205,9 +234,10 @@ function tryBoth(a: Path, b: Url, cap fs: Fs, cap net: Net)
 | Syntax | Purpose |
 |--------|---------|
 | `error Name { fields }` | Standalone error type |
-| `domain D = E1 \| E2` | Domain as union of errors |
-| `domain D = D1 \| D2` | Compose domains |
+| `domain D = E1 \| E2;` | Domain as union of errors (preferred) |
+| `domain D { E1 { } E2 { } }` | Domain with inline variants |
+| `domain D = D1 \| D2;` | Compose domains |
 | `Pick<D, E1 \| E2>` | Select errors from domain |
 | `Omit<D, E1>` | Exclude errors from domain |
-| `error (E1 \| E2)` | Inline error union |
-| `use error D` | Module default domain |
+| `error (E1 \| E2)` | Inline error union in signatures |
+| `use error D;` | Module default domain |

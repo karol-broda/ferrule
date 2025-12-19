@@ -22,6 +22,15 @@ pub const LLVMBackend = struct {
     diagnostics_list: *@import("../diagnostics.zig").DiagnosticList,
     source_file: []const u8,
 
+    // runtime functions
+    rt_println: ?*llvm.ValueRef,
+    rt_print: ?*llvm.ValueRef,
+    rt_print_i32: ?*llvm.ValueRef,
+    rt_print_i64: ?*llvm.ValueRef,
+    rt_print_f64: ?*llvm.ValueRef,
+    rt_print_bool: ?*llvm.ValueRef,
+    rt_print_newline: ?*llvm.ValueRef,
+
     // current function context
     current_function: ?*llvm.ValueRef,
     current_function_type: ?types.ResolvedType,
@@ -52,6 +61,13 @@ pub const LLVMBackend = struct {
             .functions = std.StringHashMap(*llvm.ValueRef).init(allocator),
             .diagnostics_list = diagnostics_list,
             .source_file = source_file,
+            .rt_println = null,
+            .rt_print = null,
+            .rt_print_i32 = null,
+            .rt_print_i64 = null,
+            .rt_print_f64 = null,
+            .rt_print_bool = null,
+            .rt_print_newline = null,
             .current_function = null,
             .current_function_type = null,
             .current_function_decl = null,
@@ -74,6 +90,9 @@ pub const LLVMBackend = struct {
     }
 
     pub fn generateModule(self: *LLVMBackend, module: ast.Module) !void {
+        // declare runtime functions for I/O
+        try self.declareRuntimeFunctions();
+
         // first pass: declare all functions
         for (module.statements) |stmt| {
             if (stmt == .function_decl) {
@@ -87,6 +106,144 @@ pub const LLVMBackend = struct {
                 try self.generateFunction(stmt.function_decl);
             }
         }
+    }
+
+    /// Declare external runtime functions for I/O and other standard operations
+    fn declareRuntimeFunctions(self: *LLVMBackend) !void {
+        // i8* type for string pointers
+        const i8_type = llvm.int8Type(self.context);
+        const i8_ptr_type = llvm.pointerType(i8_type, 0);
+
+        // integer types
+        const i32_type = llvm.int32Type(self.context);
+        const i64_type = llvm.int64Type(self.context);
+        const i64_size_type = llvm.int64Type(self.context); // usize is typically i64
+        const f64_type = llvm.doubleType(self.context);
+        const i1_type = llvm.int1Type(self.context);
+        const void_type = llvm.voidType(self.context);
+
+        // rt_println(str_ptr: *i8, str_len: i64) -> void
+        var println_params = [_]*llvm.TypeRef{ i8_ptr_type, i64_size_type };
+        const println_type = llvm.functionType(void_type, &println_params, 2, 0);
+        self.rt_println = llvm.addFunction(self.module, "rt_println", println_type);
+
+        // rt_print(str_ptr: *i8, str_len: i64) -> void
+        var print_params = [_]*llvm.TypeRef{ i8_ptr_type, i64_size_type };
+        const print_type = llvm.functionType(void_type, &print_params, 2, 0);
+        self.rt_print = llvm.addFunction(self.module, "rt_print", print_type);
+
+        // rt_print_i32(value: i32) -> void
+        var print_i32_params = [_]*llvm.TypeRef{i32_type};
+        const print_i32_type = llvm.functionType(void_type, &print_i32_params, 1, 0);
+        self.rt_print_i32 = llvm.addFunction(self.module, "rt_print_i32", print_i32_type);
+
+        // rt_print_i64(value: i64) -> void
+        var print_i64_params = [_]*llvm.TypeRef{i64_type};
+        const print_i64_type = llvm.functionType(void_type, &print_i64_params, 1, 0);
+        self.rt_print_i64 = llvm.addFunction(self.module, "rt_print_i64", print_i64_type);
+
+        // rt_print_f64(value: f64) -> void
+        var print_f64_params = [_]*llvm.TypeRef{f64_type};
+        const print_f64_type = llvm.functionType(void_type, &print_f64_params, 1, 0);
+        self.rt_print_f64 = llvm.addFunction(self.module, "rt_print_f64", print_f64_type);
+
+        // rt_print_bool(value: i1) -> void
+        var print_bool_params = [_]*llvm.TypeRef{i1_type};
+        const print_bool_type = llvm.functionType(void_type, &print_bool_params, 1, 0);
+        self.rt_print_bool = llvm.addFunction(self.module, "rt_print_bool", print_bool_type);
+
+        var empty_params = [_]*llvm.TypeRef{};
+        const print_newline_type = llvm.functionType(void_type, &empty_params, 0, 0);
+        self.rt_print_newline = llvm.addFunction(self.module, "rt_print_newline", print_newline_type);
+    }
+
+    fn generateBuiltinCall(self: *LLVMBackend, func_name: []const u8, args: []*ast.Expr) !*llvm.ValueRef {
+        const void_type = llvm.voidType(self.context);
+        const i8_type = llvm.int8Type(self.context);
+        const i8_ptr_type = llvm.pointerType(i8_type, 0);
+        const i32_type = llvm.int32Type(self.context);
+        const i64_type = llvm.int64Type(self.context);
+        const f64_type = llvm.doubleType(self.context);
+        const i1_type = llvm.int1Type(self.context);
+
+        if (std.mem.eql(u8, func_name, "println") or std.mem.eql(u8, func_name, "print")) {
+            // println/print take a String which is { ptr, len }
+            if (args.len != 1) return error.ExpressionNotImplemented;
+
+            const str_val = try self.generateExpression(args[0]);
+
+            // String is a struct { ptr: *i8, len: i64 }
+            // Extract ptr and len from the struct
+            const ptr_val = llvm.buildExtractValue(self.builder, str_val, 0, "str.ptr\x00");
+            const len_val = llvm.buildExtractValue(self.builder, str_val, 1, "str.len\x00");
+
+            var call_args = [_]*llvm.ValueRef{ ptr_val, len_val };
+            var param_types = [_]*llvm.TypeRef{ i8_ptr_type, i64_type };
+            const func_type = llvm.functionType(void_type, &param_types, 2, 0);
+
+            const rt_func = if (std.mem.eql(u8, func_name, "println"))
+                self.rt_println orelse return error.FunctionNotFound
+            else
+                self.rt_print orelse return error.FunctionNotFound;
+
+            return llvm.buildCall(self.builder, func_type, rt_func, &call_args, 2, "");
+        } else if (std.mem.eql(u8, func_name, "print_i32")) {
+            if (args.len != 1) return error.ExpressionNotImplemented;
+            const val = try self.generateExpression(args[0]);
+
+            var call_args = [_]*llvm.ValueRef{val};
+            var param_types = [_]*llvm.TypeRef{i32_type};
+            const func_type = llvm.functionType(void_type, &param_types, 1, 0);
+
+            const rt_func = self.rt_print_i32 orelse return error.FunctionNotFound;
+            return llvm.buildCall(self.builder, func_type, rt_func, &call_args, 1, "");
+        } else if (std.mem.eql(u8, func_name, "print_i64")) {
+            if (args.len != 1) return error.ExpressionNotImplemented;
+            const val = try self.generateExpression(args[0]);
+
+            var call_args = [_]*llvm.ValueRef{val};
+            var param_types = [_]*llvm.TypeRef{i64_type};
+            const func_type = llvm.functionType(void_type, &param_types, 1, 0);
+
+            const rt_func = self.rt_print_i64 orelse return error.FunctionNotFound;
+            return llvm.buildCall(self.builder, func_type, rt_func, &call_args, 1, "");
+        } else if (std.mem.eql(u8, func_name, "print_f64")) {
+            if (args.len != 1) return error.ExpressionNotImplemented;
+            const val = try self.generateExpression(args[0]);
+
+            var call_args = [_]*llvm.ValueRef{val};
+            var param_types = [_]*llvm.TypeRef{f64_type};
+            const func_type = llvm.functionType(void_type, &param_types, 1, 0);
+
+            const rt_func = self.rt_print_f64 orelse return error.FunctionNotFound;
+            return llvm.buildCall(self.builder, func_type, rt_func, &call_args, 1, "");
+        } else if (std.mem.eql(u8, func_name, "print_bool")) {
+            if (args.len != 1) return error.ExpressionNotImplemented;
+            const val = try self.generateExpression(args[0]);
+
+            var call_args = [_]*llvm.ValueRef{val};
+            var param_types = [_]*llvm.TypeRef{i1_type};
+            const func_type = llvm.functionType(void_type, &param_types, 1, 0);
+
+            const rt_func = self.rt_print_bool orelse return error.FunctionNotFound;
+            return llvm.buildCall(self.builder, func_type, rt_func, &call_args, 1, "");
+        } else if (std.mem.eql(u8, func_name, "print_newline")) {
+            var empty_params = [_]*llvm.TypeRef{};
+            const func_type = llvm.functionType(void_type, &empty_params, 0, 0);
+            const rt_func = self.rt_print_newline orelse return error.FunctionNotFound;
+            var empty_args = [_]*llvm.ValueRef{};
+            return llvm.buildCall(self.builder, func_type, rt_func, &empty_args, 0, "");
+        } else if (std.mem.eql(u8, func_name, "read_char")) {
+            var empty_params = [_]*llvm.TypeRef{};
+            const func_type = llvm.functionType(i32_type, &empty_params, 0, 0);
+            const rt_func = llvm.getNamedFunction(self.module, "rt_read_char") orelse blk: {
+                break :blk llvm.addFunction(self.module, "rt_read_char", func_type);
+            };
+            var empty_args = [_]*llvm.ValueRef{};
+            return llvm.buildCall(self.builder, func_type, rt_func, &empty_args, 0, "readchar\x00");
+        }
+
+        return error.FunctionNotFound;
     }
 
     fn declareFunctionPrototype(self: *LLVMBackend, func_decl: ast.FunctionDecl) !void {
@@ -135,6 +292,7 @@ pub const LLVMBackend = struct {
             .return_type = try self.allocator.create(types.ResolvedType),
             .effects = symbol.function.effects,
             .error_domain = symbol.function.error_domain,
+            .type_params = symbol.function.type_params,
         } };
         defer {
             if (self.current_function_type) |ft| {
@@ -283,8 +441,8 @@ pub const LLVMBackend = struct {
                 // but for now, skip
             },
 
-            .role_decl => {
-                // role declarations are for capability system, skip for now
+            .error_decl => {
+                // error declarations define error types, skip for now
             },
 
             .import_decl => {
@@ -411,13 +569,18 @@ pub const LLVMBackend = struct {
                     .subtract => llvm.buildSub(self.builder, lhs, rhs, result_name),
                     .multiply => llvm.buildMul(self.builder, lhs, rhs, result_name),
                     .divide => llvm.buildSDiv(self.builder, lhs, rhs, result_name),
-                    .modulo => llvm.buildSDiv(self.builder, lhs, rhs, result_name), // TODO: use srem
+                    .modulo => llvm.buildSRem(self.builder, lhs, rhs, result_name),
                     .eq => llvm.buildICmp(self.builder, .eq, lhs, rhs, cmp_name),
                     .ne => llvm.buildICmp(self.builder, .ne, lhs, rhs, cmp_name),
                     .lt => llvm.buildICmp(self.builder, .slt, lhs, rhs, cmp_name),
                     .gt => llvm.buildICmp(self.builder, .sgt, lhs, rhs, cmp_name),
                     .le => llvm.buildICmp(self.builder, .sle, lhs, rhs, cmp_name),
                     .ge => llvm.buildICmp(self.builder, .sge, lhs, rhs, cmp_name),
+                    .logical_and => llvm.buildAnd(self.builder, lhs, rhs, result_name),
+                    .logical_or => llvm.buildOr(self.builder, lhs, rhs, result_name),
+                    .bitwise_and => llvm.buildAnd(self.builder, lhs, rhs, result_name),
+                    .bitwise_or => llvm.buildOr(self.builder, lhs, rhs, result_name),
+                    .bitwise_xor => llvm.buildXor(self.builder, lhs, rhs, result_name),
                     else => error.OperationNotImplemented,
                 };
             },
@@ -459,6 +622,11 @@ pub const LLVMBackend = struct {
                 // callee must be an identifier for now
                 if (call.callee.* != .identifier) return error.ExpressionNotImplemented;
                 const func_name = call.callee.identifier.name;
+
+                // Check if this is a builtin function call
+                if (symbol_table.SymbolTable.isBuiltin(func_name)) {
+                    return try self.generateBuiltinCall(func_name, call.args);
+                }
 
                 const func = self.functions.get(func_name) orelse return error.FunctionNotFound;
 
@@ -510,7 +678,8 @@ pub const LLVMBackend = struct {
         for (if_stmt.then_block) |stmt| {
             try self.generateStatement(stmt);
         }
-        const then_has_terminator = llvm.getBasicBlockTerminator(then_block) != null;
+        const current_then_block = llvm.getInsertBlock(self.builder);
+        const then_has_terminator = llvm.getBasicBlockTerminator(current_then_block) != null;
         if (!then_has_terminator) {
             _ = llvm.buildBr(self.builder, merge_block);
         }
@@ -523,7 +692,8 @@ pub const LLVMBackend = struct {
             for (else_blk) |stmt| {
                 try self.generateStatement(stmt);
             }
-            else_has_terminator = llvm.getBasicBlockTerminator(else_bb) != null;
+            const current_else_block = llvm.getInsertBlock(self.builder);
+            else_has_terminator = llvm.getBasicBlockTerminator(current_else_block) != null;
             if (!else_has_terminator) {
                 _ = llvm.buildBr(self.builder, merge_block);
             }
@@ -557,7 +727,10 @@ pub const LLVMBackend = struct {
         for (while_stmt.body) |stmt| {
             try self.generateStatement(stmt);
         }
-        _ = llvm.buildBr(self.builder, cond_block);
+        const current_block = llvm.getInsertBlock(self.builder);
+        if (llvm.getBasicBlockTerminator(current_block) == null) {
+            _ = llvm.buildBr(self.builder, cond_block);
+        }
 
         // exit block
         llvm.positionBuilderAtEnd(self.builder, exit_block);
@@ -566,6 +739,71 @@ pub const LLVMBackend = struct {
     fn generateForStatement(self: *LLVMBackend, for_stmt: ast.ForStmt) error{ OutOfMemory, UndefinedVariable, ExpressionNotImplemented, TypeInferenceFailed, FunctionNotFound, OperationNotImplemented, InvalidNumber, StatementNotImplemented, NoCurrentFunction, NoElseBlock }!void {
         const current_func = self.current_function orelse return error.NoCurrentFunction;
 
+        if (for_stmt.iterable.* == .range) {
+            try self.generateForRange(for_stmt);
+            return;
+        }
+
+        try self.generateForArray(for_stmt, current_func);
+    }
+
+    fn generateForRange(self: *LLVMBackend, for_stmt: ast.ForStmt) !void {
+        const current_func = self.current_function orelse return error.NoCurrentFunction;
+        const range = for_stmt.iterable.range;
+
+        const start_val = try self.generateExpression(range.start);
+        const end_val = try self.generateExpression(range.end);
+
+        const i32_type = llvm.int32Type(self.context);
+        const iter_alloca = llvm.buildAlloca(self.builder, i32_type, "for.iter\x00");
+        _ = llvm.buildStore(self.builder, start_val, iter_alloca);
+
+        const cond_block = llvm.appendBasicBlock(self.context, current_func, "for.cond\x00");
+        const body_block = llvm.appendBasicBlock(self.context, current_func, "for.body\x00");
+        const exit_block = llvm.appendBasicBlock(self.context, current_func, "for.exit\x00");
+
+        _ = llvm.buildBr(self.builder, cond_block);
+
+        llvm.positionBuilderAtEnd(self.builder, cond_block);
+        const iter_val = llvm.buildLoad(self.builder, i32_type, iter_alloca, "iter\x00");
+        const cond = llvm.buildICmp(self.builder, .slt, iter_val, end_val, "for.cond\x00");
+        _ = llvm.buildCondBr(self.builder, cond, body_block, exit_block);
+
+        llvm.positionBuilderAtEnd(self.builder, body_block);
+
+        const prev_iterator_value = self.named_values.get(for_stmt.iterator);
+        const prev_iterator_type = self.named_types.get(for_stmt.iterator);
+        try self.named_values.put(for_stmt.iterator, iter_alloca);
+        try self.named_types.put(for_stmt.iterator, types.ResolvedType.i32);
+
+        for (for_stmt.body) |stmt| {
+            try self.generateStatement(stmt);
+        }
+
+        const current_block = llvm.getInsertBlock(self.builder);
+        if (llvm.getBasicBlockTerminator(current_block) == null) {
+            const current_iter = llvm.buildLoad(self.builder, i32_type, iter_alloca, "iter.cur\x00");
+            const next_iter = llvm.buildAdd(self.builder, current_iter, llvm.constInt(i32_type, 1, 0), "iter.next\x00");
+            _ = llvm.buildStore(self.builder, next_iter, iter_alloca);
+            _ = llvm.buildBr(self.builder, cond_block);
+        }
+
+        if (prev_iterator_value) |prev_val| {
+            try self.named_values.put(for_stmt.iterator, prev_val);
+        } else {
+            _ = self.named_values.remove(for_stmt.iterator);
+        }
+
+        if (prev_iterator_type) |prev_type| {
+            try self.named_types.put(for_stmt.iterator, prev_type);
+        } else {
+            _ = self.named_types.remove(for_stmt.iterator);
+        }
+
+        llvm.positionBuilderAtEnd(self.builder, exit_block);
+    }
+
+    fn generateForArray(self: *LLVMBackend, for_stmt: ast.ForStmt, current_func: *llvm.ValueRef) !void {
         const iterable_type = try self.inferExpressionType(for_stmt.iterable);
 
         if (iterable_type != .array) {
@@ -662,8 +900,11 @@ pub const LLVMBackend = struct {
                 return symbol.function.return_type;
             },
             .binary => |bin_op| {
-                // for simplicity, assume both operands have same type
-                return try self.inferExpressionType(bin_op.left);
+                // comparison and logical operations return Bool
+                return switch (bin_op.op) {
+                    .eq, .ne, .lt, .gt, .le, .ge, .logical_and, .logical_or => types.ResolvedType.bool_type,
+                    else => try self.inferExpressionType(bin_op.left),
+                };
             },
             .unary => |un_op| {
                 return try self.inferExpressionType(un_op.operand);
@@ -679,6 +920,12 @@ pub const LLVMBackend = struct {
                         .size = al.elements.len,
                     },
                 };
+            },
+            .range => |r| {
+                const elem_type = try self.inferExpressionType(r.start);
+                const elem_type_ptr = try self.allocator.create(types.ResolvedType);
+                elem_type_ptr.* = elem_type;
+                return types.ResolvedType{ .range = .{ .element_type = elem_type_ptr } };
             },
             else => error.TypeInferenceFailed,
         };

@@ -8,7 +8,7 @@ pub const Symbol = union(enum) {
     type_def: TypeSymbol,
     domain: DomainSymbol,
     parameter: ParameterSymbol,
-    role: RoleSymbol,
+    error_type: ErrorTypeSymbol,
 
     pub fn getName(self: *const Symbol) []const u8 {
         return switch (self.*) {
@@ -18,14 +18,16 @@ pub const Symbol = union(enum) {
             .type_def => |t| t.name,
             .domain => |d| d.name,
             .parameter => |p| p.name,
-            .role => |r| r.name,
+            .error_type => |e| e.name,
         };
     }
 };
 
 pub const FunctionSymbol = struct {
     name: []const u8,
+    type_params: ?[]types.TypeParamInfo,
     params: []types.ResolvedType,
+    param_names: [][]const u8,
     return_type: types.ResolvedType,
     effects: []types.Effect,
     error_domain: ?[]const u8,
@@ -47,6 +49,7 @@ pub const ConstantSymbol = struct {
 
 pub const TypeSymbol = struct {
     name: []const u8,
+    type_params: ?[]types.TypeParamInfo,
     underlying: types.ResolvedType,
 };
 
@@ -61,7 +64,7 @@ pub const ParameterSymbol = struct {
     is_capability: bool,
 };
 
-pub const RoleSymbol = struct {
+pub const ErrorTypeSymbol = struct {
     name: []const u8,
 };
 
@@ -101,8 +104,47 @@ pub const Scope = struct {
     }
 
     pub fn deinit(self: *Scope) void {
+        // free type annotations in symbols to prevent memory leaks
+        var iter = self.symbols.iterator();
+        while (iter.next()) |entry| {
+            switch (entry.value_ptr.*) {
+                .variable => |v| {
+                    v.type_annotation.deinit(self.allocator);
+                },
+                .constant => |c| {
+                    c.type_annotation.deinit(self.allocator);
+                },
+                .parameter => |p| {
+                    p.type_annotation.deinit(self.allocator);
+                },
+                else => {},
+            }
+        }
         self.symbols.deinit();
     }
+};
+
+const BuiltinParam = struct {
+    name: []const u8,
+    param_type: types.ResolvedType,
+};
+
+const BuiltinDef = struct {
+    name: []const u8,
+    params: []const BuiltinParam,
+    return_type: types.ResolvedType,
+    effects: []const types.Effect,
+};
+
+const builtins = [_]BuiltinDef{
+    .{ .name = "println", .params = &.{.{ .name = "str", .param_type = .string_type }}, .return_type = .unit_type, .effects = &.{.io} },
+    .{ .name = "print", .params = &.{.{ .name = "str", .param_type = .string_type }}, .return_type = .unit_type, .effects = &.{.io} },
+    .{ .name = "print_i32", .params = &.{.{ .name = "value", .param_type = .i32 }}, .return_type = .unit_type, .effects = &.{.io} },
+    .{ .name = "print_i64", .params = &.{.{ .name = "value", .param_type = .i64 }}, .return_type = .unit_type, .effects = &.{.io} },
+    .{ .name = "print_f64", .params = &.{.{ .name = "value", .param_type = .f64 }}, .return_type = .unit_type, .effects = &.{.io} },
+    .{ .name = "print_bool", .params = &.{.{ .name = "value", .param_type = .bool_type }}, .return_type = .unit_type, .effects = &.{.io} },
+    .{ .name = "print_newline", .params = &.{}, .return_type = .unit_type, .effects = &.{.io} },
+    .{ .name = "read_char", .params = &.{}, .return_type = .i32, .effects = &.{.io} },
 };
 
 pub const SymbolTable = struct {
@@ -110,10 +152,48 @@ pub const SymbolTable = struct {
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) SymbolTable {
-        return .{
+        var table = SymbolTable{
             .global_scope = Scope.init(allocator, null, 0),
             .allocator = allocator,
         };
+        table.registerBuiltins() catch {};
+        return table;
+    }
+
+    fn registerBuiltins(self: *SymbolTable) !void {
+        for (builtins) |builtin| {
+            const param_types = try self.allocator.alloc(types.ResolvedType, builtin.params.len);
+            const param_names = try self.allocator.alloc([]const u8, builtin.params.len);
+            const is_capability = try self.allocator.alloc(bool, builtin.params.len);
+
+            for (builtin.params, 0..) |param, i| {
+                param_types[i] = param.param_type;
+                param_names[i] = param.name;
+                is_capability[i] = false;
+            }
+
+            try self.insertGlobal(builtin.name, Symbol{
+                .function = FunctionSymbol{
+                    .name = builtin.name,
+                    .type_params = null,
+                    .params = param_types,
+                    .param_names = param_names,
+                    .return_type = builtin.return_type,
+                    .effects = try self.allocator.dupe(types.Effect, builtin.effects),
+                    .error_domain = null,
+                    .is_capability_param = is_capability,
+                },
+            });
+        }
+    }
+
+    pub fn isBuiltin(name: []const u8) bool {
+        for (builtins) |builtin| {
+            if (std.mem.eql(u8, name, builtin.name)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     pub fn insertGlobal(self: *SymbolTable, name: []const u8, symbol: Symbol) !void {
@@ -134,10 +214,11 @@ pub const SymbolTable = struct {
                         param.deinit(self.allocator);
                     }
                     self.allocator.free(f.params);
-                    
+                    self.allocator.free(f.param_names);
+
                     // deinit return type
                     f.return_type.deinit(self.allocator);
-                    
+
                     self.allocator.free(f.effects);
                     self.allocator.free(f.is_capability_param);
                 },

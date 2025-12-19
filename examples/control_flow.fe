@@ -1,8 +1,8 @@
 function fibonacci(n: u32) -> u32 {
-  if n === 0 {
+  if n == 0 {
     return 0;
   } else {
-    if n === 1 {
+    if n == 1 {
       return 1;
     } else {
       return fibonacci(n - 1) + fibonacci(n - 2);
@@ -11,7 +11,7 @@ function fibonacci(n: u32) -> u32 {
 }
 
 function factorial(n: u32) -> u32 {
-  if n === 0 {
+  if n == 0 {
     return 1;
   } else {
     return n * factorial(n - 1);
@@ -27,10 +27,10 @@ function max(a: i32, b: i32) -> i32 {
 }
 
 function is_even(n: u32) -> Bool {
-  if n === 0 {
+  if n == 0 {
     return true;
   } else {
-    if n === 1 {
+    if n == 1 {
       return false;
     } else {
       return is_even(n - 2);
@@ -38,9 +38,9 @@ function is_even(n: u32) -> Bool {
   }
 }
 
-function main() -> i32 {
-  const fib_result = fibonacci(6);
+function main() -> u32 {
+  const fib_result = fibonacci(10);
   const fact_result = factorial(5);
   const max_result = max(10, 20);
-  return max_result;
+  return fib_result;
 }

@@ -10,9 +10,9 @@ pub const TokenType = enum {
     inout_kw,
     import_kw,
     export_kw,
+    pub_kw,
     package_kw,
     type_kw,
-    role_kw,
     domain_kw,
     effects_kw,
     capability_kw,
@@ -34,6 +34,7 @@ pub const TokenType = enum {
     asm_kw,
     component_kw,
     in_kw,
+    out_kw,
     using_kw,
     ok_kw,
     err_kw,
@@ -41,11 +42,18 @@ pub const TokenType = enum {
     ensure_kw,
     map_error_kw,
     cap_kw,
+    unsafe_cast_kw,
+    unknown_kw,
+    unit_kw,
+    distribute_kw,
+    infer_kw,
+    map_kw,
 
     // literals
     identifier,
     number,
     string,
+    bytes,
     char,
     true_kw,
     false_kw,
@@ -53,6 +61,7 @@ pub const TokenType = enum {
 
     // operators
     plus,
+    plus_plus, // ++
     minus,
     star,
     slash,
@@ -63,8 +72,8 @@ pub const TokenType = enum {
     tilde,
     bang,
     eq,
-    eq_eq_eq, // ===
-    bang_eq_eq, // !==
+    eq_eq, // ==
+    bang_eq, // !=
     lt,
     gt,
     lt_eq,
@@ -76,6 +85,8 @@ pub const TokenType = enum {
     arrow, // ->
     fat_arrow, // =>
     question,
+    dotdot, // ..
+    dotdotdot, // ...
 
     // delimiters
     lparen,
@@ -152,34 +163,26 @@ pub const Lexer = struct {
             ',' => self.makeToken(.comma),
             ';' => self.makeToken(.semicolon),
             ':' => self.makeToken(.colon),
-            '.' => self.makeToken(.dot),
+
             '@' => self.makeToken(.at),
             '#' => self.makeToken(.hash),
             '~' => self.makeToken(.tilde),
             '?' => self.makeToken(.question),
-            '+' => self.makeToken(.plus),
+            '+' => if (self.match('+')) self.makeToken(.plus_plus) else self.makeToken(.plus),
             '%' => self.makeToken(.percent),
             '^' => self.makeToken(.caret),
             '*' => self.makeToken(.star),
             '/' => self.makeToken(.slash),
             '-' => if (self.match('>')) self.makeToken(.arrow) else self.makeToken(.minus),
-            '=' => if (self.match('=')) {
-                if (self.match('=')) {
-                    return self.makeToken(.eq_eq_eq);
+            '=' => if (self.match('=')) self.makeToken(.eq_eq) else if (self.match('>')) self.makeToken(.fat_arrow) else self.makeToken(.eq),
+            '!' => if (self.match('=')) self.makeToken(.bang_eq) else self.makeToken(.bang),
+            '.' => if (self.match('.')) {
+                if (self.match('.')) {
+                    return self.makeToken(.dotdotdot);
                 }
-                return self.makeToken(.invalid);
-            } else if (self.match('>')) {
-                return self.makeToken(.fat_arrow);
+                return self.makeToken(.dotdot);
             } else {
-                return self.makeToken(.eq);
-            },
-            '!' => if (self.match('=')) {
-                if (self.match('=')) {
-                    return self.makeToken(.bang_eq_eq);
-                }
-                return self.makeToken(.invalid);
-            } else {
-                return self.makeToken(.bang);
+                return self.makeToken(.dot);
             },
             '<' => if (self.match('=')) self.makeToken(.lt_eq) else if (self.match('<')) self.makeToken(.lt_lt) else self.makeToken(.lt),
             '>' => if (self.match('=')) self.makeToken(.gt_eq) else if (self.match('>')) self.makeToken(.gt_gt) else self.makeToken(.gt),
@@ -187,7 +190,8 @@ pub const Lexer = struct {
             '|' => if (self.match('|')) self.makeToken(.pipe_pipe) else self.makeToken(.pipe),
             '"' => self.string(),
             '\'' => self.charLiteral(),
-            else => self.makeToken(.invalid),
+            'b' => if (self.peek() == '"') self.bytesLiteral() else self.identifier(),
+            else => if (isAlpha(c)) self.identifier() else self.makeToken(.invalid),
         };
     }
 
@@ -292,9 +296,9 @@ pub const Lexer = struct {
             .{ "inout", .inout_kw },
             .{ "import", .import_kw },
             .{ "export", .export_kw },
+            .{ "pub", .pub_kw },
             .{ "package", .package_kw },
             .{ "type", .type_kw },
-            .{ "role", .role_kw },
             .{ "domain", .domain_kw },
             .{ "effects", .effects_kw },
             .{ "capability", .capability_kw },
@@ -316,6 +320,7 @@ pub const Lexer = struct {
             .{ "asm", .asm_kw },
             .{ "component", .component_kw },
             .{ "in", .in_kw },
+            .{ "out", .out_kw },
             .{ "using", .using_kw },
             .{ "ok", .ok_kw },
             .{ "err", .err_kw },
@@ -323,6 +328,12 @@ pub const Lexer = struct {
             .{ "ensure", .ensure_kw },
             .{ "map_error", .map_error_kw },
             .{ "cap", .cap_kw },
+            .{ "unsafe_cast", .unsafe_cast_kw },
+            .{ "unknown", .unknown_kw },
+            .{ "Unit", .unit_kw },
+            .{ "distribute", .distribute_kw },
+            .{ "infer", .infer_kw },
+            .{ "map", .map_kw },
             .{ "true", .true_kw },
             .{ "false", .false_kw },
             .{ "null", .null_kw },
@@ -385,6 +396,31 @@ pub const Lexer = struct {
 
         _ = self.advance(); // closing '
         return self.makeToken(.char);
+    }
+
+    fn bytesLiteral(self: *Lexer) Token {
+        _ = self.advance(); // consume opening "
+        while (self.peek() != '"' and !self.isAtEnd()) {
+            if (self.peek() == '\n') {
+                self.line += 1;
+                self.column = 0;
+            }
+            if (self.peek() == '\\') {
+                _ = self.advance();
+                if (!self.isAtEnd()) {
+                    _ = self.advance();
+                }
+            } else {
+                _ = self.advance();
+            }
+        }
+
+        if (self.isAtEnd()) {
+            return self.makeToken(.invalid);
+        }
+
+        _ = self.advance(); // closing "
+        return self.makeToken(.bytes);
     }
 };
 

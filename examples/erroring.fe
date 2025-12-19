@@ -1,0 +1,9 @@
+package test.error;
+
+function main() -> i32 effects [io] {
+  var sum: u32 = 0;
+  var x: i32 = 5;
+  sum = sum + x;
+  print_i32(sum);
+  return 0;
+}

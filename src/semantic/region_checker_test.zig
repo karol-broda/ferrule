@@ -21,7 +21,7 @@ test "region variable should be tracked" {
     );
     defer checker.deinit();
 
-    var value = ast.Expr{ .identifier = "create_region" };
+    var value = ast.Expr{ .identifier = .{ .name = "create_region", .loc = .{ .line = 1, .column = 1 } } };
 
     const var_decl = ast.VarDecl{
         .name = "r",
@@ -53,22 +53,25 @@ test "region without disposal should warn" {
     );
     defer checker.deinit();
 
-    var value = ast.Expr{ .identifier = "create_region" };
+    var value = ast.Expr{ .identifier = .{ .name = "create_region", .loc = .{ .line = 1, .column = 1 } } };
 
     var body1 = [_]ast.Stmt{
         .{ .var_decl = .{
             .name = "r",
-            .type_annotation = .{ .simple = "Region" },
+            .type_annotation = .{ .simple = .{ .name = "Region", .loc = .{ .line = 1, .column = 1 } } },
             .value = &value,
+            .name_loc = .{ .line = 1, .column = 1 },
         } },
     };
     const func_decl = ast.FunctionDecl{
         .name = "test_func",
+        .type_params = null,
         .params = &[_]ast.Param{},
-        .return_type = .{ .simple = "()" },
+        .return_type = .{ .simple = .{ .name = "()", .loc = .{ .line = 1, .column = 1 } } },
         .error_domain = null,
         .effects = &[_][]const u8{},
         .body = body1[0..],
+        .name_loc = .{ .line = 1, .column = 1 },
     };
 
     try checker.checkFunction(func_decl);
@@ -93,8 +96,8 @@ test "region with defer dispose should not warn" {
     );
     defer checker.deinit();
 
-    var value = ast.Expr{ .identifier = "create_region" };
-    var region_id = ast.Expr{ .identifier = "r" };
+    var value = ast.Expr{ .identifier = .{ .name = "create_region", .loc = .{ .line = 1, .column = 1 } } };
+    var region_id = ast.Expr{ .identifier = .{ .name = "r", .loc = .{ .line = 1, .column = 1 } } };
     var field_access = ast.Expr{
         .field_access = .{
             .object = &region_id,
@@ -111,18 +114,21 @@ test "region with defer dispose should not warn" {
     var body2 = [_]ast.Stmt{
         .{ .var_decl = .{
             .name = "r",
-            .type_annotation = .{ .simple = "Region" },
+            .type_annotation = .{ .simple = .{ .name = "Region", .loc = .{ .line = 1, .column = 1 } } },
             .value = &value,
+            .name_loc = .{ .line = 1, .column = 1 },
         } },
         .{ .defer_stmt = &dispose_call },
     };
     const func_decl = ast.FunctionDecl{
         .name = "test_func",
+        .type_params = null,
         .params = &[_]ast.Param{},
-        .return_type = .{ .simple = "()" },
+        .return_type = .{ .simple = .{ .name = "()", .loc = .{ .line = 1, .column = 1 } } },
         .error_domain = null,
         .effects = &[_][]const u8{},
         .body = body2[0..],
+        .name_loc = .{ .line = 1, .column = 1 },
     };
 
     try checker.checkFunction(func_decl);
@@ -147,14 +153,15 @@ test "region escaping scope should warn" {
     );
     defer checker.deinit();
 
-    var value = ast.Expr{ .identifier = "create_region" };
+    var value = ast.Expr{ .identifier = .{ .name = "create_region", .loc = .{ .line = 1, .column = 1 } } };
     var condition = ast.Expr{ .bool_literal = true };
 
     var then_stmts = [_]ast.Stmt{
         .{ .var_decl = .{
             .name = "r",
-            .type_annotation = .{ .simple = "Region" },
+            .type_annotation = .{ .simple = .{ .name = "Region", .loc = .{ .line = 1, .column = 1 } } },
             .value = &value,
+            .name_loc = .{ .line = 1, .column = 1 },
         } },
     };
     const if_stmt = ast.IfStmt{
@@ -218,13 +225,14 @@ test "while loop should check region disposal" {
     defer checker.deinit();
 
     var condition = ast.Expr{ .bool_literal = true };
-    var value = ast.Expr{ .identifier = "create_region" };
+    var value = ast.Expr{ .identifier = .{ .name = "create_region", .loc = .{ .line = 1, .column = 1 } } };
 
     var body3 = [_]ast.Stmt{
         .{ .var_decl = .{
             .name = "r",
-            .type_annotation = .{ .simple = "Region" },
+            .type_annotation = .{ .simple = .{ .name = "Region", .loc = .{ .line = 1, .column = 1 } } },
             .value = &value,
+            .name_loc = .{ .line = 1, .column = 1 },
         } },
     };
     const while_stmt = ast.WhileStmt{
@@ -254,14 +262,15 @@ test "for loop should check region disposal" {
     );
     defer checker.deinit();
 
-    var iterable = ast.Expr{ .identifier = "items" };
-    var value = ast.Expr{ .identifier = "create_region" };
+    var iterable = ast.Expr{ .identifier = .{ .name = "items", .loc = .{ .line = 1, .column = 1 } } };
+    var value = ast.Expr{ .identifier = .{ .name = "create_region", .loc = .{ .line = 1, .column = 1 } } };
 
     var body4 = [_]ast.Stmt{
         .{ .var_decl = .{
             .name = "r",
-            .type_annotation = .{ .simple = "Region" },
+            .type_annotation = .{ .simple = .{ .name = "Region", .loc = .{ .line = 1, .column = 1 } } },
             .value = &value,
+            .name_loc = .{ .line = 1, .column = 1 },
         } },
     };
     const for_stmt = ast.ForStmt{
@@ -293,9 +302,9 @@ test "isRegionType correctly identifies region types" {
     );
     defer checker.deinit();
 
-    try std.testing.expect(checker.isRegionType(.{ .simple = "Region" }));
-    try std.testing.expect(!checker.isRegionType(.{ .simple = "i32" }));
-    try std.testing.expect(!checker.isRegionType(.{ .simple = "String" }));
+    try std.testing.expect(checker.isRegionType(.{ .simple = .{ .name = "Region", .loc = .{ .line = 1, .column = 1 } } }));
+    try std.testing.expect(!checker.isRegionType(.{ .simple = .{ .name = "i32", .loc = .{ .line = 1, .column = 1 } } }));
+    try std.testing.expect(!checker.isRegionType(.{ .simple = .{ .name = "String", .loc = .{ .line = 1, .column = 1 } } }));
 }
 
 test "non-region variables should not be tracked" {

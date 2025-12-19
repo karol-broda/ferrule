@@ -21,11 +21,10 @@ function main() -> i32 {
   const x: i32 = 10;
   const y: i32 = 20;
   const result = add(x, y);
-  
-  if result === 30 {
+
+  if result == 30 {
     return 0;
   } else {
     return 1;
   }
 }
-

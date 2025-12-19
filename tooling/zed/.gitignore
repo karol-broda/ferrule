@@ -1,0 +1,15 @@
+# rust/cargo build artifacts
+target/
+**/*.rs.bk
+
+# cargo lock is typically committed for applications/extensions
+# but uncomment if you prefer not to track it
+# Cargo.lock
+
+# compiled wasm extension
+*.wasm
+
+# os-specific files
+
+# debug files
+*.pdb

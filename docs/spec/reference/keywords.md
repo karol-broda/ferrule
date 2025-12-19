@@ -81,6 +81,11 @@ These identifiers are reserved and cannot be used as variable, function, or type
 | `component` | WASM component |
 | `unsafe_cast` | unsafe type cast |
 | `unknown` | dynamic type requiring narrowing |
+| `Unit` | unit type/value |
+| `distribute` | distributive conditional types |
+| `infer` | type inference in conditionals |
+| `map` | mapped types |
+| `out` | covariant variance |
 
 ---
 
@@ -95,6 +100,8 @@ These were in earlier drafts but are **not** in α1:
 | `impl` | Replaced by namespaced constants |
 | `self` | Functions use explicit first parameter |
 | `fn` | Use `function` for all functions |
+| `===` | Use `==` for equality (no triple equals) |
+| `!==` | Use `!=` for inequality |
 
 ---
 

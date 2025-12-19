@@ -5,6 +5,7 @@ const symbol_table = @import("../symbol_table.zig");
 const error_domains = @import("../error_domains.zig");
 const diagnostics = @import("../diagnostics.zig");
 const types = @import("../types.zig");
+const symbol_locations = @import("../symbol_locations.zig");
 
 test "collect simple function declaration" {
     const allocator = std.testing.allocator;
@@ -18,16 +19,21 @@ test "collect simple function declaration" {
     var diag_list = diagnostics.DiagnosticList.init(allocator);
     defer diag_list.deinit();
 
+    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
+    defer location_table.deinit();
+
     var collector = declaration_pass.DeclarationCollector.init(
         allocator,
         &symbols,
         &domains,
         &diag_list,
         "test.fe",
+        &location_table,
     );
 
     const func_decl = ast.FunctionDecl{
         .name = "test_func",
+        .type_params = null,
         .params = &[_]ast.Param{},
         .return_type = .{ .simple = .{ .name = "()", .loc = .{ .line = 1, .column = 1 } } },
         .error_domain = null,
@@ -56,16 +62,21 @@ test "detect duplicate function declaration" {
     var diag_list = diagnostics.DiagnosticList.init(allocator);
     defer diag_list.deinit();
 
+    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
+    defer location_table.deinit();
+
     var collector = declaration_pass.DeclarationCollector.init(
         allocator,
         &symbols,
         &domains,
         &diag_list,
         "test.fe",
+        &location_table,
     );
 
     const func_decl = ast.FunctionDecl{
         .name = "duplicate",
+        .type_params = null,
         .params = &[_]ast.Param{},
         .return_type = .{ .simple = .{ .name = "()", .loc = .{ .line = 1, .column = 1 } } },
         .error_domain = null,
@@ -92,17 +103,22 @@ test "collect function with effects" {
     var diag_list = diagnostics.DiagnosticList.init(allocator);
     defer diag_list.deinit();
 
+    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
+    defer location_table.deinit();
+
     var collector = declaration_pass.DeclarationCollector.init(
         allocator,
         &symbols,
         &domains,
         &diag_list,
         "test.fe",
+        &location_table,
     );
 
     var io_effect = [_][]const u8{"io"};
     const func_decl = ast.FunctionDecl{
         .name = "io_func",
+        .type_params = null,
         .params = &[_]ast.Param{},
         .return_type = .{ .simple = .{ .name = "()", .loc = .{ .line = 1, .column = 1 } } },
         .error_domain = null,
@@ -133,17 +149,22 @@ test "collect unknown effect results in error" {
     var diag_list = diagnostics.DiagnosticList.init(allocator);
     defer diag_list.deinit();
 
+    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
+    defer location_table.deinit();
+
     var collector = declaration_pass.DeclarationCollector.init(
         allocator,
         &symbols,
         &domains,
         &diag_list,
         "test.fe",
+        &location_table,
     );
 
     var unknown_effect = [_][]const u8{"unknown_effect"};
     const func_decl = ast.FunctionDecl{
         .name = "bad_effect",
+        .type_params = null,
         .params = &[_]ast.Param{},
         .return_type = .{ .simple = .{ .name = "()", .loc = .{ .line = 1, .column = 1 } } },
         .error_domain = null,
@@ -169,26 +190,31 @@ test "collect type declaration" {
     var diag_list = diagnostics.DiagnosticList.init(allocator);
     defer diag_list.deinit();
 
+    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
+    defer location_table.deinit();
+
     var collector = declaration_pass.DeclarationCollector.init(
         allocator,
         &symbols,
         &domains,
         &diag_list,
         "test.fe",
+        &location_table,
     );
 
     const type_decl = ast.TypeDecl{
-        .name = "MyType",
-        .type_expr = .{ .simple = .{ .name = "i32", .loc = .{ .line = 1, .column = 1 } } },
+        .name = "UserId",
+        .type_params = null,
+        .type_expr = .{ .simple = .{ .name = "u64", .loc = .{ .line = 1, .column = 1 } } },
         .name_loc = .{ .line = 1, .column = 1 },
     };
 
     try collector.collectTypeDecl(type_decl);
 
-    const symbol = symbols.lookupGlobal("MyType");
+    const symbol = symbols.lookupGlobal("UserId");
     try std.testing.expect(symbol != null);
     try std.testing.expect(symbol.? == .type_def);
-    try std.testing.expectEqualStrings("MyType", symbol.?.type_def.name);
+    try std.testing.expectEqualStrings("UserId", symbol.?.type_def.name);
 }
 
 test "detect duplicate type declaration" {
@@ -203,17 +229,22 @@ test "detect duplicate type declaration" {
     var diag_list = diagnostics.DiagnosticList.init(allocator);
     defer diag_list.deinit();
 
+    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
+    defer location_table.deinit();
+
     var collector = declaration_pass.DeclarationCollector.init(
         allocator,
         &symbols,
         &domains,
         &diag_list,
         "test.fe",
+        &location_table,
     );
 
     const type_decl = ast.TypeDecl{
         .name = "DupType",
-        .type_expr = .{ .simple = .{ .name = "i32", .loc = .{ .line = 1, .column = 1 } } },
+        .type_params = null,
+        .type_expr = .{ .simple = .{ .name = "u32", .loc = .{ .line = 1, .column = 1 } } },
         .name_loc = .{ .line = 1, .column = 1 },
     };
 
@@ -235,12 +266,16 @@ test "collect domain declaration" {
     var diag_list = diagnostics.DiagnosticList.init(allocator);
     defer diag_list.deinit();
 
+    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
+    defer location_table.deinit();
+
     var collector = declaration_pass.DeclarationCollector.init(
         allocator,
         &symbols,
         &domains,
         &diag_list,
         "test.fe",
+        &location_table,
     );
 
     var variants = [_]ast.DomainVariant{
@@ -249,6 +284,7 @@ test "collect domain declaration" {
     };
     const domain_decl = ast.DomainDecl{
         .name = "FileError",
+        .error_union = null,
         .variants = variants[0..],
         .name_loc = .{ .line = 1, .column = 1 },
     };
@@ -276,16 +312,21 @@ test "detect duplicate domain declaration" {
     var diag_list = diagnostics.DiagnosticList.init(allocator);
     defer diag_list.deinit();
 
+    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
+    defer location_table.deinit();
+
     var collector = declaration_pass.DeclarationCollector.init(
         allocator,
         &symbols,
         &domains,
         &diag_list,
         "test.fe",
+        &location_table,
     );
 
     const domain_decl = ast.DomainDecl{
         .name = "DupDomain",
+        .error_union = null,
         .variants = &[_]ast.DomainVariant{},
         .name_loc = .{ .line = 1, .column = 1 },
     };
@@ -296,7 +337,7 @@ test "detect duplicate domain declaration" {
     try std.testing.expect(diag_list.hasErrors());
 }
 
-test "collect role declaration" {
+test "collect error declaration" {
     const allocator = std.testing.allocator;
 
     var symbols = symbol_table.SymbolTable.init(allocator);
@@ -308,23 +349,29 @@ test "collect role declaration" {
     var diag_list = diagnostics.DiagnosticList.init(allocator);
     defer diag_list.deinit();
 
+    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
+    defer location_table.deinit();
+
     var collector = declaration_pass.DeclarationCollector.init(
         allocator,
         &symbols,
         &domains,
         &diag_list,
         "test.fe",
+        &location_table,
     );
 
-    const role_decl = ast.RoleDecl{
-        .name = "Admin",
+    const error_decl = ast.ErrorDecl{
+        .name = "NotFound",
+        .fields = &[_]ast.Field{},
+        .name_loc = .{ .line = 1, .column = 1 },
     };
 
-    try collector.collectRole(role_decl);
+    try collector.collectErrorDecl(error_decl);
 
-    const symbol = symbols.lookupGlobal("Admin");
+    const symbol = symbols.lookupGlobal("NotFound");
     try std.testing.expect(symbol != null);
-    try std.testing.expect(symbol.? == .role);
+    try std.testing.expect(symbol.? == .error_type);
 }
 
 test "collect const declaration" {
@@ -339,12 +386,16 @@ test "collect const declaration" {
     var diag_list = diagnostics.DiagnosticList.init(allocator);
     defer diag_list.deinit();
 
+    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
+    defer location_table.deinit();
+
     var collector = declaration_pass.DeclarationCollector.init(
         allocator,
         &symbols,
         &domains,
         &diag_list,
         "test.fe",
+        &location_table,
     );
 
     var value_expr = ast.Expr{ .number = "42" };
@@ -374,12 +425,16 @@ test "collect module with multiple declarations" {
     var diag_list = diagnostics.DiagnosticList.init(allocator);
     defer diag_list.deinit();
 
+    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
+    defer location_table.deinit();
+
     var collector = declaration_pass.DeclarationCollector.init(
         allocator,
         &symbols,
         &domains,
         &diag_list,
         "test.fe",
+        &location_table,
     );
 
     var value_expr = ast.Expr{ .number = "42" };
@@ -387,20 +442,25 @@ test "collect module with multiple declarations" {
     var statements = [_]ast.Stmt{
         .{ .function_decl = .{
             .name = "func1",
+            .type_params = null,
             .params = &[_]ast.Param{},
-            .return_type = .{ .simple = "()" },
+            .return_type = .{ .simple = .{ .name = "()", .loc = .{ .line = 1, .column = 1 } } },
             .error_domain = null,
             .effects = &[_][]const u8{},
             .body = &[_]ast.Stmt{},
+            .name_loc = .{ .line = 1, .column = 1 },
         } },
         .{ .type_decl = .{
             .name = "Type1",
-            .type_expr = .{ .simple = "i32" },
+            .type_params = null,
+            .type_expr = .{ .simple = .{ .name = "i32", .loc = .{ .line = 1, .column = 1 } } },
+            .name_loc = .{ .line = 1, .column = 1 },
         } },
         .{ .const_decl = .{
             .name = "CONST1",
             .type_annotation = null,
             .value = &value_expr,
+            .name_loc = .{ .line = 1, .column = 1 },
         } },
     };
 

@@ -107,11 +107,33 @@ pub const SemanticAnalyzer = struct {
                         continue;
                     };
 
+                    // set up type parameter context for generic functions
+                    if (original_func_decl.type_params) |tps| {
+                        const names = try self.allocator.alloc([]const u8, tps.len);
+                        const is_const = try self.allocator.alloc(bool, tps.len);
+                        for (tps, 0..) |tp, i| {
+                            names[i] = tp.name;
+                            is_const[i] = tp.is_const;
+                        }
+                        resolver.setTypeParamContext(.{
+                            .type_param_names = names,
+                            .is_const = is_const,
+                        });
+                    }
+
                     for (original_func_decl.params, 0..) |param, i| {
                         func.params[i] = try resolver.resolve(param.type_annotation);
                     }
 
                     func.return_type = try resolver.resolve(original_func_decl.return_type);
+
+                    // clear type param context
+                    if (original_func_decl.type_params) |tps| {
+                        self.allocator.free(resolver.type_param_context.type_param_names);
+                        self.allocator.free(resolver.type_param_context.is_const);
+                        _ = tps;
+                    }
+                    resolver.clearTypeParamContext();
                 },
                 .type_def => |*type_def| {
                     const original_type_decl = blk: {
@@ -125,7 +147,29 @@ pub const SemanticAnalyzer = struct {
                         continue;
                     };
 
+                    // set up type parameter context for generic types
+                    if (original_type_decl.type_params) |tps| {
+                        const names = try self.allocator.alloc([]const u8, tps.len);
+                        const is_const = try self.allocator.alloc(bool, tps.len);
+                        for (tps, 0..) |tp, i| {
+                            names[i] = tp.name;
+                            is_const[i] = tp.is_const;
+                        }
+                        resolver.setTypeParamContext(.{
+                            .type_param_names = names,
+                            .is_const = is_const,
+                        });
+                    }
+
                     type_def.underlying = try resolver.resolve(original_type_decl.type_expr);
+
+                    // clear type param context
+                    if (original_type_decl.type_params) |tps| {
+                        self.allocator.free(resolver.type_param_context.type_param_names);
+                        self.allocator.free(resolver.type_param_context.is_const);
+                        _ = tps;
+                    }
+                    resolver.clearTypeParamContext();
 
                     try self.hover_table.add(
                         original_type_decl.name_loc.line,
@@ -145,52 +189,78 @@ pub const SemanticAnalyzer = struct {
         for (module.statements) |stmt| {
             if (stmt == .domain_decl) {
                 const domain_decl = stmt.domain_decl;
-                var variant_infos = try self.allocator.alloc(hover_info.DomainVariantInfo, domain_decl.variants.len);
-                errdefer self.allocator.free(variant_infos);
 
-                // track all temp allocations for cleanup
-                var temp_field_names = std.ArrayList([][]const u8){};
-                defer {
-                    for (temp_field_names.items) |names| {
-                        self.allocator.free(names);
-                    }
-                    temp_field_names.deinit(self.allocator);
-                }
-                var temp_field_types = std.ArrayList([]types.ResolvedType){};
-                defer {
-                    for (temp_field_types.items) |type_arr| {
-                        self.allocator.free(type_arr);
-                    }
-                    temp_field_types.deinit(self.allocator);
-                }
+                // Handle union syntax (error_union) - just store error names as variants
+                if (domain_decl.error_union) |error_names| {
+                    var variant_infos = try self.allocator.alloc(hover_info.DomainVariantInfo, error_names.len);
+                    errdefer self.allocator.free(variant_infos);
 
-                for (domain_decl.variants, 0..) |variant, i| {
-                    const field_names = try self.allocator.alloc([]const u8, variant.fields.len);
-                    try temp_field_names.append(self.allocator, field_names);
-                    const field_types = try self.allocator.alloc(types.ResolvedType, variant.fields.len);
-                    try temp_field_types.append(self.allocator, field_types);
-
-                    for (variant.fields, 0..) |field, j| {
-                        field_names[j] = field.name;
-                        field_types[j] = try resolver.resolve(field.type_annotation);
+                    for (error_names, 0..) |err_name, i| {
+                        variant_infos[i] = .{
+                            .name = err_name,
+                            .field_names = &[_][]const u8{},
+                            .field_types = &[_]types.ResolvedType{},
+                        };
                     }
 
-                    variant_infos[i] = .{
-                        .name = variant.name,
-                        .field_names = field_names,
-                        .field_types = field_types,
-                    };
+                    try self.hover_table.addDomain(
+                        domain_decl.name_loc.line,
+                        domain_decl.name_loc.column,
+                        domain_decl.name.len,
+                        domain_decl.name,
+                        variant_infos,
+                    );
+
+                    self.allocator.free(variant_infos);
+                } else if (domain_decl.variants) |variants| {
+                    // Handle inline variant syntax
+                    var variant_infos = try self.allocator.alloc(hover_info.DomainVariantInfo, variants.len);
+                    errdefer self.allocator.free(variant_infos);
+
+                    // track all temp allocations for cleanup
+                    var temp_field_names = std.ArrayList([][]const u8){};
+                    defer {
+                        for (temp_field_names.items) |names| {
+                            self.allocator.free(names);
+                        }
+                        temp_field_names.deinit(self.allocator);
+                    }
+                    var temp_field_types = std.ArrayList([]types.ResolvedType){};
+                    defer {
+                        for (temp_field_types.items) |type_arr| {
+                            self.allocator.free(type_arr);
+                        }
+                        temp_field_types.deinit(self.allocator);
+                    }
+
+                    for (variants, 0..) |variant, i| {
+                        const field_names = try self.allocator.alloc([]const u8, variant.fields.len);
+                        try temp_field_names.append(self.allocator, field_names);
+                        const field_types = try self.allocator.alloc(types.ResolvedType, variant.fields.len);
+                        try temp_field_types.append(self.allocator, field_types);
+
+                        for (variant.fields, 0..) |field, j| {
+                            field_names[j] = field.name;
+                            field_types[j] = try resolver.resolve(field.type_annotation);
+                        }
+
+                        variant_infos[i] = .{
+                            .name = variant.name,
+                            .field_names = field_names,
+                            .field_types = field_types,
+                        };
+                    }
+
+                    try self.hover_table.addDomain(
+                        domain_decl.name_loc.line,
+                        domain_decl.name_loc.column,
+                        domain_decl.name.len,
+                        domain_decl.name,
+                        variant_infos,
+                    );
+
+                    self.allocator.free(variant_infos);
                 }
-
-                try self.hover_table.addDomain(
-                    domain_decl.name_loc.line,
-                    domain_decl.name_loc.column,
-                    domain_decl.name.len,
-                    domain_decl.name,
-                    variant_infos,
-                );
-
-                self.allocator.free(variant_infos);
             }
         }
     }

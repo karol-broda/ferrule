@@ -36,6 +36,7 @@ extern fn LLVMVectorType(elem: *TypeRef, count: c_uint) *TypeRef;
 
 // function/value creation
 extern fn LLVMAddFunction(m: *ModuleRef, name: [*:0]const u8, func_type: *TypeRef) *ValueRef;
+extern fn LLVMGetNamedFunction(m: *ModuleRef, name: [*:0]const u8) ?*ValueRef;
 extern fn LLVMGetParam(fn_val: *ValueRef, index: c_uint) *ValueRef;
 extern fn LLVMAppendBasicBlockInContext(ctx: *ContextRef, fn_val: *ValueRef, name: [*:0]const u8) *BasicBlockRef;
 extern fn LLVMPositionBuilderAtEnd(builder: *BuilderRef, block: *BasicBlockRef) void;
@@ -54,6 +55,11 @@ extern fn LLVMBuildSub(builder: *BuilderRef, lhs: *ValueRef, rhs: *ValueRef, nam
 extern fn LLVMBuildMul(builder: *BuilderRef, lhs: *ValueRef, rhs: *ValueRef, name: [*:0]const u8) *ValueRef;
 extern fn LLVMBuildSDiv(builder: *BuilderRef, lhs: *ValueRef, rhs: *ValueRef, name: [*:0]const u8) *ValueRef;
 extern fn LLVMBuildUDiv(builder: *BuilderRef, lhs: *ValueRef, rhs: *ValueRef, name: [*:0]const u8) *ValueRef;
+extern fn LLVMBuildSRem(builder: *BuilderRef, lhs: *ValueRef, rhs: *ValueRef, name: [*:0]const u8) *ValueRef;
+extern fn LLVMBuildURem(builder: *BuilderRef, lhs: *ValueRef, rhs: *ValueRef, name: [*:0]const u8) *ValueRef;
+extern fn LLVMBuildAnd(builder: *BuilderRef, lhs: *ValueRef, rhs: *ValueRef, name: [*:0]const u8) *ValueRef;
+extern fn LLVMBuildOr(builder: *BuilderRef, lhs: *ValueRef, rhs: *ValueRef, name: [*:0]const u8) *ValueRef;
+extern fn LLVMBuildXor(builder: *BuilderRef, lhs: *ValueRef, rhs: *ValueRef, name: [*:0]const u8) *ValueRef;
 extern fn LLVMBuildFAdd(builder: *BuilderRef, lhs: *ValueRef, rhs: *ValueRef, name: [*:0]const u8) *ValueRef;
 extern fn LLVMBuildFSub(builder: *BuilderRef, lhs: *ValueRef, rhs: *ValueRef, name: [*:0]const u8) *ValueRef;
 extern fn LLVMBuildFMul(builder: *BuilderRef, lhs: *ValueRef, rhs: *ValueRef, name: [*:0]const u8) *ValueRef;
@@ -66,6 +72,7 @@ extern fn LLVMBuildICmp(builder: *BuilderRef, op: IntPredicate, lhs: *ValueRef, 
 extern fn LLVMBuildFCmp(builder: *BuilderRef, op: RealPredicate, lhs: *ValueRef, rhs: *ValueRef, name: [*:0]const u8) *ValueRef;
 extern fn LLVMBuildBr(builder: *BuilderRef, dest: *BasicBlockRef) *ValueRef;
 extern fn LLVMBuildCondBr(builder: *BuilderRef, cond: *ValueRef, then_block: *BasicBlockRef, else_block: *BasicBlockRef) *ValueRef;
+extern fn LLVMGetInsertBlock(builder: *BuilderRef) *BasicBlockRef;
 extern fn LLVMBuildPhi(builder: *BuilderRef, ty: *TypeRef, name: [*:0]const u8) *ValueRef;
 extern fn LLVMAddIncoming(phi: *ValueRef, incoming_values: [*]const *ValueRef, incoming_blocks: [*]const *BasicBlockRef, count: c_uint) void;
 extern fn LLVMBuildGEP2(builder: *BuilderRef, ty: *TypeRef, ptr: *ValueRef, indices: [*]const *ValueRef, num_indices: c_uint, name: [*:0]const u8) *ValueRef;
@@ -208,6 +215,10 @@ pub fn addFunction(m: *ModuleRef, name: [*:0]const u8, func_type: *TypeRef) *Val
     return LLVMAddFunction(m, name, func_type);
 }
 
+pub fn getNamedFunction(m: *ModuleRef, name: [*:0]const u8) ?*ValueRef {
+    return LLVMGetNamedFunction(m, name);
+}
+
 pub fn getParam(fn_val: *ValueRef, index: c_uint) *ValueRef {
     return LLVMGetParam(fn_val, index);
 }
@@ -271,6 +282,26 @@ pub fn buildUDiv(builder: *BuilderRef, lhs: *ValueRef, rhs: *ValueRef, name: [*:
     return LLVMBuildUDiv(builder, lhs, rhs, name);
 }
 
+pub fn buildSRem(builder: *BuilderRef, lhs: *ValueRef, rhs: *ValueRef, name: [*:0]const u8) *ValueRef {
+    return LLVMBuildSRem(builder, lhs, rhs, name);
+}
+
+pub fn buildURem(builder: *BuilderRef, lhs: *ValueRef, rhs: *ValueRef, name: [*:0]const u8) *ValueRef {
+    return LLVMBuildURem(builder, lhs, rhs, name);
+}
+
+pub fn buildAnd(builder: *BuilderRef, lhs: *ValueRef, rhs: *ValueRef, name: [*:0]const u8) *ValueRef {
+    return LLVMBuildAnd(builder, lhs, rhs, name);
+}
+
+pub fn buildOr(builder: *BuilderRef, lhs: *ValueRef, rhs: *ValueRef, name: [*:0]const u8) *ValueRef {
+    return LLVMBuildOr(builder, lhs, rhs, name);
+}
+
+pub fn buildXor(builder: *BuilderRef, lhs: *ValueRef, rhs: *ValueRef, name: [*:0]const u8) *ValueRef {
+    return LLVMBuildXor(builder, lhs, rhs, name);
+}
+
 pub fn buildFAdd(builder: *BuilderRef, lhs: *ValueRef, rhs: *ValueRef, name: [*:0]const u8) *ValueRef {
     return LLVMBuildFAdd(builder, lhs, rhs, name);
 }
@@ -317,6 +348,10 @@ pub fn buildBr(builder: *BuilderRef, dest: *BasicBlockRef) *ValueRef {
 
 pub fn buildCondBr(builder: *BuilderRef, cond: *ValueRef, then_block: *BasicBlockRef, else_block: *BasicBlockRef) *ValueRef {
     return LLVMBuildCondBr(builder, cond, then_block, else_block);
+}
+
+pub fn getInsertBlock(builder: *BuilderRef) *BasicBlockRef {
+    return LLVMGetInsertBlock(builder);
 }
 
 pub fn buildPhi(builder: *BuilderRef, ty: *TypeRef, name: [*:0]const u8) *ValueRef {

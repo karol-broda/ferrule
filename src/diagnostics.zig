@@ -1,151 +1,140 @@
 const std = @import("std");
+const render = @import("render.zig");
 
-const Color = struct {
-    const reset = "\x1b[0m";
-    const bold = "\x1b[1m";
-    const red = "\x1b[31m";
-    const yellow = "\x1b[33m";
-    const cyan = "\x1b[36m";
-    const blue = "\x1b[34m";
-    const white = "\x1b[37m";
-    const dim = "\x1b[2m";
+pub const Theme = render.Theme;
+pub const Renderer = render.Renderer;
+pub const Box = render.Box;
+
+pub const DiagnosticLevel = enum {
+    @"error",
+    warning,
+    note,
+
+    pub fn toString(self: DiagnosticLevel) []const u8 {
+        return switch (self) {
+            .@"error" => "error",
+            .warning => "warning",
+            .note => "note",
+        };
+    }
 };
 
-pub const ColorConfig = struct {
-    enabled: bool,
-
-    pub fn init() ColorConfig {
-        if (std.process.hasEnvVarConstant("NO_COLOR")) {
-            return .{ .enabled = false };
-        }
-
-        const stderr_fd: std.posix.fd_t = std.posix.STDERR_FILENO;
-        const is_tty = std.posix.isatty(stderr_fd);
-        return .{ .enabled = is_tty };
-    }
-
-    pub fn reset(self: ColorConfig) []const u8 {
-        return if (self.enabled) Color.reset else "";
-    }
-
-    pub fn bold(self: ColorConfig) []const u8 {
-        return if (self.enabled) Color.bold else "";
-    }
-
-    pub fn red(self: ColorConfig) []const u8 {
-        return if (self.enabled) Color.red else "";
-    }
-
-    pub fn yellow(self: ColorConfig) []const u8 {
-        return if (self.enabled) Color.yellow else "";
-    }
-
-    pub fn cyan(self: ColorConfig) []const u8 {
-        return if (self.enabled) Color.cyan else "";
-    }
-
-    pub fn blue(self: ColorConfig) []const u8 {
-        return if (self.enabled) Color.blue else "";
-    }
-
-    pub fn white(self: ColorConfig) []const u8 {
-        return if (self.enabled) Color.white else "";
-    }
-
-    pub fn dim(self: ColorConfig) []const u8 {
-        return if (self.enabled) Color.dim else "";
-    }
+pub const Location = struct {
+    file: []const u8,
+    line: usize,
+    column: usize,
+    length: usize,
 };
 
 pub const Diagnostic = struct {
-    level: Level,
+    level: DiagnosticLevel,
     message: []const u8,
-    location: SourceLocation,
+    location: Location,
     hint: ?[]const u8,
 
-    pub const Level = enum {
-        @"error",
-        warning,
-        note,
+    pub fn renderTo(self: Diagnostic, source_content: ?[]const u8, r: *Renderer) !void {
+        const theme = r.theme;
 
-        pub fn toString(self: Level) []const u8 {
-            return switch (self) {
-                .@"error" => "error",
-                .warning => "warning",
-                .note => "note",
-            };
-        }
+        const level_color = switch (self.level) {
+            .@"error" => theme.red(),
+            .warning => theme.yellow(),
+            .note => theme.cyan(),
+        };
 
-        pub fn toColor(self: Level, colors: ColorConfig) []const u8 {
-            return switch (self) {
-                .@"error" => colors.red(),
-                .warning => colors.yellow(),
-                .note => colors.cyan(),
-            };
-        }
-    };
-
-    pub fn formatWithSource(
-        self: Diagnostic,
-        source_content: ?[]const u8,
-        writer: anytype,
-        colors: ColorConfig,
-    ) !void {
-        const level_color = self.level.toColor(colors);
-        const bold = colors.bold();
-        const reset = colors.reset();
-        const blue = colors.blue();
-        const cyan = colors.cyan();
-
-        try writer.print("{s}{s}{s}: {s}{s}\n", .{
-            bold,
-            level_color,
-            self.level.toString(),
-            self.message,
-            reset,
-        });
-        try writer.print("{s}  ┌─ {s}{s}:{d}:{d}{s}\n", .{
-            blue,
-            bold,
-            self.location.file,
-            self.location.line,
-            self.location.column,
-            reset,
-        });
+        try r.writer.writeAll(theme.bold());
+        try r.writer.writeAll(level_color);
+        try r.write(self.level.toString());
+        try r.writer.writeAll(theme.reset());
+        try r.write(": ");
+        try r.write(self.message);
+        try r.newline();
 
         if (source_content) |source| {
-            const line_content = getLine(source, self.location.line);
+            const line_content = render.getLine(source, self.location.line);
             if (line_content) |line| {
-                try writer.print("{s}  │{s}\n", .{ blue, reset });
-                try writer.print("{s}{d: >3} │{s} {s}\n", .{
-                    blue,
-                    self.location.line,
-                    reset,
-                    line,
-                });
-                try writer.print("{s}  │{s} ", .{ blue, reset });
+                const line_num_width = render.countDigits(self.location.line);
+                const gutter = if (line_num_width < 3) 3 else line_num_width;
 
-                // add spacing before the highlight
+                try r.spaces(gutter);
+                try r.space();
+                try r.dim(Box.top_left);
+                try r.dim(Box.horizontal);
+                try r.write("[");
+                try r.blue(self.location.file);
+                try r.write(":");
+                try r.styledFmt(theme.magenta(), "{d}", .{self.location.line});
+                try r.write(":");
+                try r.styledFmt(theme.magenta(), "{d}", .{self.location.column});
+                try r.write("]");
+                try r.newline();
+
+                try r.spaces(gutter);
+                try r.space();
+                try r.dim(Box.vertical);
+                try r.newline();
+
+                try r.spaces(gutter - line_num_width);
+                try r.styledFmt(theme.magenta(), "{d}", .{self.location.line});
+                try r.space();
+                try r.dim(Box.vertical);
+                try r.space();
+                try r.write(line);
+                try r.newline();
+
+                try r.spaces(gutter);
+                try r.space();
+                try r.dim(Box.vertical);
+                try r.space();
+
                 var i: usize = 0;
                 while (i < self.location.column - 1) : (i += 1) {
-                    try writer.writeAll(" ");
+                    try r.space();
                 }
 
-                // add the highlight carets
-                try writer.writeAll(level_color);
-                i = 0;
+                try r.writer.writeAll(theme.bold());
+                try r.writer.writeAll(level_color);
                 const highlight_len = if (self.location.length > 0) self.location.length else 1;
+                i = 0;
                 while (i < highlight_len) : (i += 1) {
-                    try writer.writeAll("^");
+                    try r.write(Box.horizontal);
                 }
-                try writer.print("{s}\n", .{reset});
+                try r.writer.writeAll(theme.reset());
+                try r.newline();
+
+                if (self.hint) |hint| {
+                    try r.spaces(gutter);
+                    try r.space();
+                    try r.dim("╰");
+                    try r.dim("─");
+                    try r.space();
+                    try r.cyan("help");
+                    try r.dim(":");
+                    try r.space();
+                    try r.write(hint);
+                    try r.newline();
+                }
+            }
+        } else {
+            try r.write("  ");
+            try r.dim("at");
+            try r.space();
+            try r.write(self.location.file);
+            try r.write(":");
+            try r.print("{d}", .{self.location.line});
+            try r.write(":");
+            try r.print("{d}", .{self.location.column});
+            try r.newline();
+
+            if (self.hint) |hint| {
+                try r.write("  ");
+                try r.cyan("help:");
+                try r.space();
+                try r.write(hint);
+                try r.newline();
             }
         }
 
-        if (self.hint) |hint| {
-            try writer.print("{s}  │{s}\n", .{ blue, reset });
-            try writer.print("{s}  = {s}help:{s} {s}\n", .{ blue, cyan, reset, hint });
-        }
+        try r.newline();
     }
 
     pub fn format(
@@ -156,38 +145,19 @@ pub const Diagnostic = struct {
     ) !void {
         _ = fmt;
         _ = options;
-        const colors = ColorConfig.init();
-        try self.formatWithSource(null, writer, colors);
+        var r = Renderer.init(writer.any());
+        try self.renderTo(null, &r);
     }
 
-    fn getLine(source: []const u8, target_line: usize) ?[]const u8 {
-        var line: usize = 1;
-        var start: usize = 0;
-        var i: usize = 0;
-
-        while (i < source.len) : (i += 1) {
-            if (source[i] == '\n') {
-                if (line == target_line) {
-                    return source[start..i];
-                }
-                line += 1;
-                start = i + 1;
-            }
-        }
-
-        if (line == target_line) {
-            return source[start..];
-        }
-
-        return null;
+    pub fn formatWithSource(
+        self: Diagnostic,
+        source_content: ?[]const u8,
+        writer: anytype,
+        theme: Theme,
+    ) !void {
+        var r = Renderer.initWithTheme(writer.any(), theme);
+        try self.renderTo(source_content, &r);
     }
-};
-
-pub const SourceLocation = struct {
-    file: []const u8,
-    line: usize,
-    column: usize,
-    length: usize,
 };
 
 pub const DiagnosticList = struct {
@@ -209,16 +179,29 @@ pub const DiagnosticList = struct {
         };
     }
 
+    pub fn deinit(self: *DiagnosticList) void {
+        for (self.allocated_messages.items) |msg| {
+            self.allocator.free(msg);
+        }
+        self.allocated_messages.deinit(self.allocator);
+
+        for (self.allocated_hints.items) |hint| {
+            self.allocator.free(hint);
+        }
+        self.allocated_hints.deinit(self.allocator);
+
+        self.diagnostics.deinit(self.allocator);
+    }
+
+    pub fn setSource(self: *DiagnosticList, source: []const u8) void {
+        self.source_content = source;
+    }
+
     pub fn setSourceContent(self: *DiagnosticList, source: []const u8) void {
         self.source_content = source;
     }
 
-    pub fn addError(
-        self: *DiagnosticList,
-        message: []const u8,
-        location: SourceLocation,
-        hint: ?[]const u8,
-    ) !void {
+    pub fn addError(self: *DiagnosticList, message: []const u8, location: Location, hint: ?[]const u8) !void {
         try self.allocated_messages.append(self.allocator, message);
         if (hint) |h| {
             try self.allocated_hints.append(self.allocator, h);
@@ -231,12 +214,7 @@ pub const DiagnosticList = struct {
         });
     }
 
-    pub fn addWarning(
-        self: *DiagnosticList,
-        message: []const u8,
-        location: SourceLocation,
-        hint: ?[]const u8,
-    ) !void {
+    pub fn addWarning(self: *DiagnosticList, message: []const u8, location: Location, hint: ?[]const u8) !void {
         try self.allocated_messages.append(self.allocator, message);
         if (hint) |h| {
             try self.allocated_hints.append(self.allocator, h);
@@ -249,12 +227,7 @@ pub const DiagnosticList = struct {
         });
     }
 
-    pub fn addNote(
-        self: *DiagnosticList,
-        message: []const u8,
-        location: SourceLocation,
-        hint: ?[]const u8,
-    ) !void {
+    pub fn addNote(self: *DiagnosticList, message: []const u8, location: Location, hint: ?[]const u8) !void {
         try self.allocated_messages.append(self.allocator, message);
         if (hint) |h| {
             try self.allocated_hints.append(self.allocator, h);
@@ -269,28 +242,43 @@ pub const DiagnosticList = struct {
 
     pub fn hasErrors(self: *const DiagnosticList) bool {
         for (self.diagnostics.items) |diag| {
-            if (diag.level == .@"error") return true;
+            if (diag.level == .@"error") {
+                return true;
+            }
         }
         return false;
     }
 
-    pub fn print(self: *const DiagnosticList, writer: anytype) !void {
-        const colors = ColorConfig.init();
+    pub fn errorCount(self: *const DiagnosticList) usize {
+        var count: usize = 0;
         for (self.diagnostics.items) |diag| {
-            try diag.formatWithSource(self.source_content, writer, colors);
-            try writer.writeAll("\n");
+            if (diag.level == .@"error") {
+                count += 1;
+            }
+        }
+        return count;
+    }
+
+    pub fn warningCount(self: *const DiagnosticList) usize {
+        var count: usize = 0;
+        for (self.diagnostics.items) |diag| {
+            if (diag.level == .warning) {
+                count += 1;
+            }
+        }
+        return count;
+    }
+
+    pub fn render(self: *const DiagnosticList, r: *Renderer) !void {
+        for (self.diagnostics.items) |diag| {
+            try diag.renderTo(self.source_content, r);
         }
     }
 
-    pub fn deinit(self: *DiagnosticList) void {
-        for (self.allocated_messages.items) |message| {
-            self.allocator.free(message);
-        }
-        self.allocated_messages.deinit(self.allocator);
-        for (self.allocated_hints.items) |hint| {
-            self.allocator.free(hint);
-        }
-        self.allocated_hints.deinit(self.allocator);
-        self.diagnostics.deinit(self.allocator);
+    pub fn print(self: *const DiagnosticList, writer: anytype) !void {
+        var r = Renderer.init(writer.any());
+        try self.render(&r);
     }
 };
+
+pub const ColorConfig = Theme;

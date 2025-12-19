@@ -5,3 +5,5 @@ node_modules
 .turbo
 out/
 .npmrc
+.DS_Store
+Thumbs.db

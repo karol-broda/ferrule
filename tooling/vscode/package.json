@@ -2,7 +2,7 @@
   "name": "ferrule",
   "displayName": "Ferrule Language Support",
   "description": "Language support for Ferrule programming language",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "ferrule",
   "engines": {
     "vscode": "^1.75.0"
@@ -32,7 +32,7 @@
       {
         "language": "ferrule",
         "scopeName": "source.ferrule",
-        "path": "./node_modules/@ferrule/grammar/ferrule.tmLanguage.json"
+        "path": "@ferrule/grammar/ferrule.tmLanguage.json"
       }
     ],
     "configuration": {

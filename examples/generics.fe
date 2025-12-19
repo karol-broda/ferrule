@@ -1,0 +1,28 @@
+package example.generics;
+
+type IntBox = Array<i32, 5>;
+
+type Box<T> = { value: T };
+
+type Pair<T, U> = { first: T, second: U };
+
+type Status = | Ok | Error { message: String };
+
+function identity<T>(x: T) -> T {
+  return x;
+}
+
+function main() -> i32 effects [io] {
+  println("testing generics:");
+
+  const a = identity(u32(42));
+  print_u32(a);
+  print_newline();
+
+  const b = identity(true);
+  print_bool(b);
+  print_newline();
+
+  println("done");
+  return 0;
+}

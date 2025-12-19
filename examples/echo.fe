@@ -1,0 +1,18 @@
+package example.echo;
+
+function main() -> i32 effects [io] {
+  println("type a character and press enter:");
+
+  const c = read_char();
+
+  if c == -1 {
+    println("error reading input");
+    return 1;
+  }
+
+  print("you typed: ");
+  print_i32(c);
+  print_newline();
+
+  return 0;
+}

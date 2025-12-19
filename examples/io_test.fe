@@ -1,0 +1,30 @@
+package example.io_test;
+
+function main() -> i32 effects [io] {
+  print_i32(42);
+  print_newline();
+
+  const x: i32 = 10;
+  const y: i32 = 20;
+  const result = x + y;
+  print_i32(result);
+  print_newline();
+
+  println("hello from ferrule!");
+  print("the answer is: ");
+  print_i32(42);
+  print_newline();
+
+  print_bool(true);
+  print_newline();
+  print_bool(false);
+  print_newline();
+
+  if result == 30 {
+    println("arithmetic check passed!");
+    return 0;
+  } else {
+    println("arithmetic check failed!");
+    return 1;
+  }
+}

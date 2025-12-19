@@ -4,11 +4,33 @@ const types = @import("../types.zig");
 const symbol_table = @import("../symbol_table.zig");
 const diagnostics = @import("../diagnostics.zig");
 
+pub const TypeParamContext = struct {
+    type_param_names: []const []const u8,
+    is_const: []const bool,
+
+    pub fn empty() TypeParamContext {
+        return .{
+            .type_param_names = &[_][]const u8{},
+            .is_const = &[_]bool{},
+        };
+    }
+
+    pub fn findTypeParam(self: TypeParamContext, name: []const u8) ?usize {
+        for (self.type_param_names, 0..) |tp_name, i| {
+            if (std.mem.eql(u8, tp_name, name)) {
+                return i;
+            }
+        }
+        return null;
+    }
+};
+
 pub const TypeResolver = struct {
     symbols: *symbol_table.SymbolTable,
     diagnostics_list: *diagnostics.DiagnosticList,
     allocator: std.mem.Allocator,
     source_file: []const u8,
+    type_param_context: TypeParamContext,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -21,7 +43,16 @@ pub const TypeResolver = struct {
             .diagnostics_list = diagnostics_list,
             .allocator = allocator,
             .source_file = source_file,
+            .type_param_context = TypeParamContext.empty(),
         };
+    }
+
+    pub fn setTypeParamContext(self: *TypeResolver, ctx: TypeParamContext) void {
+        self.type_param_context = ctx;
+    }
+
+    pub fn clearTypeParamContext(self: *TypeResolver) void {
+        self.type_param_context = TypeParamContext.empty();
     }
 
     pub fn resolve(self: *TypeResolver, type_expr: ast.Type) std.mem.Allocator.Error!types.ResolvedType {
@@ -33,12 +64,25 @@ pub const TypeResolver = struct {
             .view => |view| try self.resolveView(view),
             .nullable => |nullable| try self.resolveNullable(nullable),
             .function_type => |ft| try self.resolveFunctionType(ft),
+            .record_type => |rt| try self.resolveRecordType(rt),
+            .union_type => |ut| try self.resolveUnionType(ut),
         };
     }
 
     fn resolveSimple(self: *TypeResolver, simple: anytype) std.mem.Allocator.Error!types.ResolvedType {
         const name = simple.name;
         const loc = simple.loc;
+
+        // first check if this is a type parameter in scope
+        if (self.type_param_context.findTypeParam(name)) |index| {
+            return types.ResolvedType{
+                .type_param = .{
+                    .name = name,
+                    .index = index,
+                },
+            };
+        }
+
         const primitive_types = std.StaticStringMap(types.ResolvedType).initComptime(.{
             .{ "i8", .i8 },
             .{ "i16", .i16 },
@@ -342,6 +386,57 @@ pub const TypeResolver = struct {
                 .return_type = return_type_ptr,
                 .effects = effects,
                 .error_domain = ft.error_domain,
+                .type_params = null,
+            },
+        };
+    }
+
+    fn resolveRecordType(self: *TypeResolver, rt: anytype) std.mem.Allocator.Error!types.ResolvedType {
+        const field_names = try self.allocator.alloc([]const u8, rt.fields.len);
+        errdefer self.allocator.free(field_names);
+
+        const field_types = try self.allocator.alloc(types.ResolvedType, rt.fields.len);
+        errdefer self.allocator.free(field_types);
+
+        for (rt.fields, 0..) |field, i| {
+            field_names[i] = try self.allocator.dupe(u8, field.name);
+            field_types[i] = try self.resolve(field.type_annotation);
+        }
+
+        return types.ResolvedType{
+            .record = .{
+                .field_names = field_names,
+                .field_types = field_types,
+            },
+        };
+    }
+
+    fn resolveUnionType(self: *TypeResolver, ut: anytype) std.mem.Allocator.Error!types.ResolvedType {
+        const variants = try self.allocator.alloc(types.UnionVariantInfo, ut.variants.len);
+        errdefer self.allocator.free(variants);
+
+        for (ut.variants, 0..) |variant, i| {
+            const field_count = if (variant.fields) |fields| fields.len else 0;
+            const field_names = try self.allocator.alloc([]const u8, field_count);
+            const field_types = try self.allocator.alloc(types.ResolvedType, field_count);
+
+            if (variant.fields) |fields| {
+                for (fields, 0..) |field, j| {
+                    field_names[j] = try self.allocator.dupe(u8, field.name);
+                    field_types[j] = try self.resolve(field.type_annotation);
+                }
+            }
+
+            variants[i] = .{
+                .name = try self.allocator.dupe(u8, variant.name),
+                .field_names = field_names,
+                .field_types = field_types,
+            };
+        }
+
+        return types.ResolvedType{
+            .union_type = .{
+                .variants = variants,
             },
         };
     }

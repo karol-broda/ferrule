@@ -91,6 +91,46 @@ pub const TypeMapper = struct {
                 const elem_type = try self.mapType(v.element_type.*);
                 return llvm.vectorType(elem_type, @intCast(v.size));
             },
+
+            .range => |r| {
+                const elem_type = try self.mapType(r.element_type.*);
+                return self.createRangeType(elem_type);
+            },
+
+            // type parameters - should be resolved before codegen
+            .type_param => llvm.pointerType(llvm.int8Type(self.context), 0),
+
+            // generic instances - map to underlying if available
+            .generic_instance => |g| {
+                if (g.underlying) |underlying| {
+                    return try self.mapType(underlying.*);
+                }
+                return llvm.pointerType(llvm.int8Type(self.context), 0);
+            },
+
+            // const values - map to the const type
+            .const_value => |cv| try self.mapType(cv.const_type.*),
+
+            // record types - map to struct
+            .record => |r| {
+                const field_types = try self.allocator.alloc(*llvm.TypeRef, r.field_types.len);
+                defer self.allocator.free(field_types);
+                for (r.field_types, 0..) |ft, i| {
+                    field_types[i] = try self.mapType(ft);
+                }
+                return llvm.structTypeInContext(self.context, field_types.ptr, @intCast(field_types.len), 0);
+            },
+
+            // union types - map to tagged union {tag: i8, payload}
+            .union_type => |u| {
+                _ = u;
+                // simplified: {tag: i8, max_payload_size}
+                const fields = [_]*llvm.TypeRef{
+                    llvm.int8Type(self.context), // tag
+                    llvm.int64Type(self.context), // payload (simplified)
+                };
+                return llvm.structTypeInContext(self.context, &fields, 2, 0);
+            },
         };
     }
 
@@ -145,5 +185,13 @@ pub const TypeMapper = struct {
             llvm.int64Type(self.context), // error code (simplified)
         };
         return llvm.structTypeInContext(self.context, &fields, 3, 0);
+    }
+
+    fn createRangeType(self: *TypeMapper, elem_type: *llvm.TypeRef) *llvm.TypeRef {
+        const fields = [_]*llvm.TypeRef{
+            elem_type, // start
+            elem_type, // end
+        };
+        return llvm.structTypeInContext(self.context, &fields, 2, 0);
     }
 };

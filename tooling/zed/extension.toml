@@ -1,0 +1,19 @@
+id = "ferrule"
+name = "Ferrule"
+version = "0.1.0"
+schema_version = 1
+authors = ["Karol Broda <me@karolbroda.com>"]
+description = "Ferrule language support for Zed"
+repository = "https://github.com/karol-broda/ferrule"
+
+[lib]
+kind = "Rust"
+version = "0.7.0"
+
+[grammars.ferrule]
+repository = "https://github.com/karol-broda/tree-sitter-ferrule"
+rev = "29c116d5531e620c35464dc58ea95a0cc938f896"
+
+[language_servers.ferrule-lsp]
+name = "Ferrule LSP"
+languages = ["Ferrule"]

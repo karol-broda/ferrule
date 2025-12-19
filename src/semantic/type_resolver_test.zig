@@ -21,19 +21,19 @@ test "resolve primitive types" {
         "test.fe",
     );
 
-    const resolved_i32 = try resolver.resolve(.{ .simple = "i32" });
+    const resolved_i32 = try resolver.resolve(.{ .simple = .{ .name = "i32", .loc = .{ .line = 1, .column = 1 } } });
     try std.testing.expectEqual(types.ResolvedType.i32, resolved_i32);
 
-    const resolved_i64 = try resolver.resolve(.{ .simple = "i64" });
+    const resolved_i64 = try resolver.resolve(.{ .simple = .{ .name = "i64", .loc = .{ .line = 1, .column = 1 } } });
     try std.testing.expectEqual(types.ResolvedType.i64, resolved_i64);
 
-    const resolved_f32 = try resolver.resolve(.{ .simple = "f32" });
+    const resolved_f32 = try resolver.resolve(.{ .simple = .{ .name = "f32", .loc = .{ .line = 1, .column = 1 } } });
     try std.testing.expectEqual(types.ResolvedType.f32, resolved_f32);
 
-    const resolved_bool = try resolver.resolve(.{ .simple = "Bool" });
+    const resolved_bool = try resolver.resolve(.{ .simple = .{ .name = "Bool", .loc = .{ .line = 1, .column = 1 } } });
     try std.testing.expectEqual(types.ResolvedType.bool_type, resolved_bool);
 
-    const resolved_string = try resolver.resolve(.{ .simple = "String" });
+    const resolved_string = try resolver.resolve(.{ .simple = .{ .name = "String", .loc = .{ .line = 1, .column = 1 } } });
     try std.testing.expectEqual(types.ResolvedType.string_type, resolved_string);
 }
 
@@ -53,7 +53,7 @@ test "resolve unknown type should error" {
         "test.fe",
     );
 
-    _ = try resolver.resolve(.{ .simple = "UnknownType" });
+    _ = try resolver.resolve(.{ .simple = .{ .name = "UnknownType", .loc = .{ .line = 1, .column = 1 } } });
 
     try std.testing.expect(diag_list.hasErrors());
 }
@@ -70,6 +70,7 @@ test "resolve named type from symbol table" {
     const type_symbol = symbol_table.Symbol{
         .type_def = .{
             .name = "MyInt",
+            .type_params = null,
             .underlying = .i32,
         },
     };
@@ -83,8 +84,9 @@ test "resolve named type from symbol table" {
         "test.fe",
     );
 
-    const resolved = try resolver.resolve(.{ .simple = "MyInt" });
-    defer resolved.deinit(allocator);
+    const resolved = try resolver.resolve(.{ .simple = .{ .name = "MyInt", .loc = .{ .line = 1, .column = 1 } } });
+    // manually free underlying pointer only - name is a static string from the symbol table
+    defer allocator.destroy(resolved.named.underlying);
 
     try std.testing.expect(resolved == .named);
     try std.testing.expectEqualStrings("MyInt", resolved.named.name);
@@ -106,13 +108,14 @@ test "resolve array type" {
         "test.fe",
     );
 
-    var element_type = ast.Type{ .simple = "i32" };
+    var element_type = ast.Type{ .simple = .{ .name = "i32", .loc = .{ .line = 1, .column = 1 } } };
     var size_expr = ast.Expr{ .number = "10" };
 
     const array_type = ast.Type{
         .array = .{
             .element_type = &element_type,
             .size = &size_expr,
+            .loc = .{ .line = 1, .column = 1 },
         },
     };
 
@@ -140,13 +143,14 @@ test "resolve vector type" {
         "test.fe",
     );
 
-    var element_type = ast.Type{ .simple = "f32" };
+    var element_type = ast.Type{ .simple = .{ .name = "f32", .loc = .{ .line = 1, .column = 1 } } };
     var size_expr = ast.Expr{ .number = "4" };
 
     const vector_type = ast.Type{
         .vector = .{
             .element_type = &element_type,
             .size = &size_expr,
+            .loc = .{ .line = 1, .column = 1 },
         },
     };
 
@@ -174,12 +178,13 @@ test "resolve view type immutable" {
         "test.fe",
     );
 
-    var element_type = ast.Type{ .simple = "i32" };
+    var element_type = ast.Type{ .simple = .{ .name = "i32", .loc = .{ .line = 1, .column = 1 } } };
 
     const view_type = ast.Type{
         .view = .{
             .element_type = &element_type,
             .mutable = false,
+            .loc = .{ .line = 1, .column = 1 },
         },
     };
 
@@ -207,12 +212,13 @@ test "resolve view type mutable" {
         "test.fe",
     );
 
-    var element_type = ast.Type{ .simple = "i32" };
+    var element_type = ast.Type{ .simple = .{ .name = "i32", .loc = .{ .line = 1, .column = 1 } } };
 
     const view_type = ast.Type{
         .view = .{
             .element_type = &element_type,
             .mutable = true,
+            .loc = .{ .line = 1, .column = 1 },
         },
     };
 
@@ -239,9 +245,9 @@ test "resolve nullable type" {
         "test.fe",
     );
 
-    var inner_type = ast.Type{ .simple = "i32" };
+    var inner_type = ast.Type{ .simple = .{ .name = "i32", .loc = .{ .line = 1, .column = 1 } } };
 
-    const nullable_type = ast.Type{ .nullable = &inner_type };
+    const nullable_type = ast.Type{ .nullable = .{ .inner = &inner_type, .loc = .{ .line = 1, .column = 1 } } };
 
     const resolved = try resolver.resolve(nullable_type);
     defer resolved.deinit(allocator);
@@ -266,8 +272,8 @@ test "resolve function type with no effects" {
         "test.fe",
     );
 
-    const param_type = ast.Type{ .simple = "i32" };
-    var return_type = ast.Type{ .simple = "i32" };
+    const param_type = ast.Type{ .simple = .{ .name = "i32", .loc = .{ .line = 1, .column = 1 } } };
+    var return_type = ast.Type{ .simple = .{ .name = "i32", .loc = .{ .line = 1, .column = 1 } } };
 
     var func_params = [_]ast.Type{param_type};
     const func_type = ast.Type{
@@ -276,6 +282,7 @@ test "resolve function type with no effects" {
             .return_type = &return_type,
             .error_domain = null,
             .effects = &[_][]const u8{},
+            .loc = .{ .line = 1, .column = 1 },
         },
     };
 
@@ -304,7 +311,7 @@ test "resolve function type with effects" {
         "test.fe",
     );
 
-    var return_type = ast.Type{ .simple = "()" };
+    var return_type = ast.Type{ .simple = .{ .name = "()", .loc = .{ .line = 1, .column = 1 } } };
 
     var func_effects = [_][]const u8{ "io", "fs" };
     const func_type = ast.Type{
@@ -313,6 +320,7 @@ test "resolve function type with effects" {
             .return_type = &return_type,
             .error_domain = null,
             .effects = func_effects[0..],
+            .loc = .{ .line = 1, .column = 1 },
         },
     };
 
@@ -341,7 +349,7 @@ test "resolve function type with unknown effect should error" {
         "test.fe",
     );
 
-    var return_type = ast.Type{ .simple = "()" };
+    var return_type = ast.Type{ .simple = .{ .name = "()", .loc = .{ .line = 1, .column = 1 } } };
 
     var unknown_effects = [_][]const u8{"unknown_effect"};
     const func_type = ast.Type{
@@ -350,6 +358,7 @@ test "resolve function type with unknown effect should error" {
             .return_type = &return_type,
             .error_domain = null,
             .effects = unknown_effects[0..],
+            .loc = .{ .line = 1, .column = 1 },
         },
     };
 
@@ -396,7 +405,7 @@ test "evaluate invalid const expression should error" {
         "test.fe",
     );
 
-    var size_expr = ast.Expr{ .identifier = "not_const" };
+    var size_expr = ast.Expr{ .identifier = .{ .name = "not_const", .loc = .{ .line = 1, .column = 1 } } };
     _ = try resolver.evaluateConstExpr(&size_expr);
 
     try std.testing.expect(diag_list.hasErrors());
@@ -455,7 +464,7 @@ test "resolve all primitive integer types" {
     };
 
     for (int_types) |int_type| {
-        const resolved = try resolver.resolve(.{ .simple = int_type.name });
+        const resolved = try resolver.resolve(.{ .simple = .{ .name = int_type.name, .loc = .{ .line = 1, .column = 1 } } });
         try std.testing.expectEqual(int_type.expected, resolved);
     }
 }
@@ -483,7 +492,7 @@ test "resolve all primitive float types" {
     };
 
     for (float_types) |float_type| {
-        const resolved = try resolver.resolve(.{ .simple = float_type.name });
+        const resolved = try resolver.resolve(.{ .simple = .{ .name = float_type.name, .loc = .{ .line = 1, .column = 1 } } });
         try std.testing.expectEqual(float_type.expected, resolved);
     }
 }
@@ -497,14 +506,22 @@ test "non-type symbol should error when resolved as type" {
     var diag_list = diagnostics.DiagnosticList.init(allocator);
     defer diag_list.deinit();
 
+    // heap allocate arrays that will be freed by symbol table deinit
+    const func_params = try allocator.alloc(types.ResolvedType, 0);
+    const func_param_names = try allocator.alloc([]const u8, 0);
+    const func_effects = try allocator.alloc(types.Effect, 0);
+    const func_is_cap = try allocator.alloc(bool, 0);
+
     const func_symbol = symbol_table.Symbol{
         .function = .{
             .name = "not_a_type",
-            .params = &[_]types.ResolvedType{},
+            .type_params = null,
+            .params = func_params,
+            .param_names = func_param_names,
             .return_type = .unit_type,
-            .effects = &[_]types.Effect{},
+            .effects = func_effects,
             .error_domain = null,
-            .is_capability_param = &[_]bool{},
+            .is_capability_param = func_is_cap,
         },
     };
 
@@ -517,7 +534,7 @@ test "non-type symbol should error when resolved as type" {
         "test.fe",
     );
 
-    _ = try resolver.resolve(.{ .simple = "not_a_type" });
+    _ = try resolver.resolve(.{ .simple = .{ .name = "not_a_type", .loc = .{ .line = 1, .column = 1 } } });
 
     try std.testing.expect(diag_list.hasErrors());
 }

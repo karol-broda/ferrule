@@ -5,6 +5,8 @@ const printer = @import("printer.zig");
 const semantic = @import("semantic.zig");
 const codegen = @import("codegen.zig");
 
+const RUNTIME_LIB_NAME = "libferrule_rt.a";
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer {
@@ -149,12 +151,30 @@ pub fn main() !void {
     std.debug.print("  Assembly: {s}\n", .{asm_file});
     std.debug.print("  Object:   {s}\n", .{obj_file});
 
-    // link object file to create executable
-    const link_cmd = try std.fmt.allocPrint(
-        allocator,
-        "cc {s} -o {s}",
-        .{ obj_file, exe_file },
-    );
+    const exe_dir = blk: {
+        var self_exe_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const self_exe_path = std.fs.selfExePath(&self_exe_path_buf) catch {
+            break :blk ".";
+        };
+        const dir_end = std.mem.lastIndexOf(u8, self_exe_path, "/") orelse 0;
+        break :blk self_exe_path[0..dir_end];
+    };
+
+    const runtime_lib_path = try findRuntimeLib(allocator, exe_dir);
+    defer if (runtime_lib_path) |p| allocator.free(p);
+
+    const link_cmd = if (runtime_lib_path) |rt_path|
+        try std.fmt.allocPrint(
+            allocator,
+            "cc {s} {s} -o {s}",
+            .{ obj_file, rt_path, exe_file },
+        )
+    else
+        try std.fmt.allocPrint(
+            allocator,
+            "cc {s} -o {s}",
+            .{ obj_file, exe_file },
+        );
     defer allocator.free(link_cmd);
 
     const link_result = std.process.Child.run(.{
@@ -175,6 +195,28 @@ pub fn main() !void {
     std.debug.print("  Binary:   {s}\n", .{exe_file});
 
     std.debug.print("\n=== compilation complete ===\n", .{});
+}
+
+fn findRuntimeLib(allocator: std.mem.Allocator, exe_dir: []const u8) !?[]const u8 {
+    const search_paths = [_][]const u8{
+        try std.fmt.allocPrint(allocator, "{s}/{s}", .{ exe_dir, RUNTIME_LIB_NAME }),
+        try std.fmt.allocPrint(allocator, "{s}/../lib/{s}", .{ exe_dir, RUNTIME_LIB_NAME }),
+        try std.fmt.allocPrint(allocator, "zig-out/lib/{s}", .{RUNTIME_LIB_NAME}),
+    };
+    defer for (search_paths) |path| {
+        allocator.free(path);
+    };
+
+    for (search_paths) |path| {
+        if (std.fs.cwd().access(path, .{})) |_| {
+            return try allocator.dupe(u8, path);
+        } else |_| {
+            continue;
+        }
+    }
+
+    std.debug.print("warning: runtime library not found, io functions will not work\n", .{});
+    return null;
 }
 
 test "simple test" {

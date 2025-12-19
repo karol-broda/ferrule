@@ -34,15 +34,15 @@
         },
         {
           "name": "keyword.declaration.ferrule",
-          "match": "\\b(const|var|function|type|role|domain|effects|capability|component)\\b"
+          "match": "\\b(const|var|function|type|error|domain|effects|capability|component|pub)\\b"
         },
         {
           "name": "keyword.other.ferrule",
-          "match": "\\b(package|import|export|use|error|as|where|with|context|inout|comptime|derivation|asm|using|in|ok|err|check|ensure|map_error|cap)\\b"
+          "match": "\\b(package|import|export|use|as|where|with|context|inout|comptime|asm|using|in|out|ok|err|check|ensure|map_error|cap|infer|distribute|unknown|unsafe_cast|is)\\b"
         },
         {
           "name": "storage.modifier.ferrule",
-          "match": "\\b(const|var|inout)\\b"
+          "match": "\\b(const|var|inout|pub|cap)\\b"
         }
       ]
     },
@@ -100,7 +100,7 @@
       "patterns": [
         {
           "name": "keyword.operator.comparison.ferrule",
-          "match": "(===|!==|<=|>=|<|>)"
+          "match": "(==|!=|<=|>=|<|>)"
         },
         {
           "name": "keyword.operator.logical.ferrule",
@@ -108,7 +108,7 @@
         },
         {
           "name": "keyword.operator.arithmetic.ferrule",
-          "match": "(\\+|-|\\*|/|%)"
+          "match": "(\\+\\+|\\+|-|\\*|/|%)"
         },
         {
           "name": "keyword.operator.bitwise.ferrule",
@@ -120,7 +120,11 @@
         },
         {
           "name": "keyword.operator.arrow.ferrule",
-          "match": "(->|=>)"
+          "match": "->"
+        },
+        {
+          "name": "keyword.operator.spread.ferrule",
+          "match": "\\.\\.\\."
         },
         {
           "name": "keyword.operator.other.ferrule",
@@ -132,11 +136,11 @@
       "patterns": [
         {
           "name": "support.type.primitive.ferrule",
-          "match": "\\b(i8|i16|i32|i64|i128|u8|u16|u32|u64|u128|usize|f16|f32|f64|Bool|Char|String|Bytes|Unit|Nat)\\b"
+          "match": "\\b(i8|i16|i32|i64|i128|u8|u16|u32|u64|u128|usize|f16|f32|f64|Bool|Char|String|Bytes|Nat|Never)\\b"
         },
         {
           "name": "support.type.compound.ferrule",
-          "match": "\\b(Array|Vector|View|Maybe|Result|Map|Set)\\b"
+          "match": "\\b(Array|Vector|View|Maybe|Result|Map|Set|Region)\\b"
         },
         {
           "name": "entity.name.type.ferrule",
@@ -161,9 +165,12 @@
         {
           "name": "constant.language.null.ferrule",
           "match": "\\bnull\\b"
+        },
+        {
+          "name": "constant.language.unit.ferrule",
+          "match": "\\bUnit\\b"
         }
       ]
     }
   }
 }
-

@@ -1,0 +1,26 @@
+package example.fizzbuzz;
+
+function main() -> i32 effects [io] {
+  println("fizzbuzz from 1 to 30:");
+  println("");
+
+  for i in 1..31 {
+    const by3 = i % 3 == 0;
+    const by5 = i % 5 == 0;
+
+    if by3 && by5 {
+      println("fizzbuzz");
+    } else if by3 {
+      println("fizz");
+    } else if by5 {
+      println("buzz");
+    } else {
+      print_i32(i);
+      print_newline();
+    }
+  }
+
+  println("");
+  println("done");
+  return 0;
+}

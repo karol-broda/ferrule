@@ -73,8 +73,13 @@ pub const EffectChecker = struct {
                 }
             }
 
+            const is_main = std.mem.eql(u8, func.name, "main");
+
             for (func_symbol.effects) |declared_effect| {
                 const has_capability = blk: {
+                    if (is_main and self.isAmbientCapability(declared_effect)) {
+                        break :blk true;
+                    }
                     for (func.params, func_symbol.is_capability_param) |param, is_cap| {
                         if (is_cap and self.isCapabilityForEffect(param.type_annotation, declared_effect)) {
                             break :blk true;
@@ -257,6 +262,14 @@ pub const EffectChecker = struct {
             .atomics => "Atomics",
             .simd => "Simd",
             .ffi => "Ffi",
+        };
+    }
+
+    pub fn isAmbientCapability(self: *EffectChecker, effect: types.Effect) bool {
+        _ = self;
+        return switch (effect) {
+            .io, .fs, .net, .time, .rng => true,
+            .alloc, .cpu, .atomics, .simd, .ffi => false,
         };
     }
 };

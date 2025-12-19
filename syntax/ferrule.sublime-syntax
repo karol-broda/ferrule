@@ -39,9 +39,9 @@ contexts:
   keywords:
     - match: \b(if|else|match|for|while|break|continue|return|defer)\b
       scope: keyword.control.ferrule
-    - match: \b(const|var|function|type|role|domain|effects|capability|component)\b
+    - match: \b(const|var|function|type|error|domain|effects|capability|component|pub)\b
       scope: keyword.declaration.ferrule
-    - match: \b(package|import|export|use|error|as|where|with|context|inout|comptime|derivation|asm|using|in|ok|err|check|ensure|map_error|cap)\b
+    - match: \b(package|import|export|use|as|where|with|context|inout|comptime|asm|using|in|out|ok|err|check|ensure|map_error|cap|infer|distribute|unknown|unsafe_cast|is)\b
       scope: keyword.other.ferrule
 
   strings:
@@ -85,11 +85,13 @@ contexts:
       scope: constant.language.boolean.ferrule
     - match: \bnull\b
       scope: constant.language.null.ferrule
+    - match: \bUnit\b
+      scope: constant.language.unit.ferrule
 
   types:
-    - match: \b(i8|i16|i32|i64|i128|u8|u16|u32|u64|u128|usize|f16|f32|f64|Bool|Char|String|Bytes|Unit|Nat)\b
+    - match: \b(i8|i16|i32|i64|i128|u8|u16|u32|u64|u128|usize|f16|f32|f64|Bool|Char|String|Bytes|Nat|Never)\b
       scope: support.type.primitive.ferrule
-    - match: \b(Array|Vector|View|Maybe|Result|Map|Set)\b
+    - match: \b(Array|Vector|View|Maybe|Result|Map|Set|Region)\b
       scope: support.type.compound.ferrule
     - match: \b[A-Z][a-zA-Z0-9_]*\b
       scope: entity.name.type.ferrule
@@ -99,20 +101,22 @@ contexts:
       scope: entity.name.function.ferrule
 
   operators:
-    - match: '===|!=='
+    - match: '==|!='
       scope: keyword.operator.comparison.ferrule
     - match: '<=|>=|<|>'
       scope: keyword.operator.comparison.ferrule
     - match: '&&|\|\||!'
       scope: keyword.operator.logical.ferrule
-    - match: '\+|-|\*|/|%'
+    - match: '\+\+|\+|-|\*|/|%'
       scope: keyword.operator.arithmetic.ferrule
     - match: '&|\||\^|~|<<|>>'
       scope: keyword.operator.bitwise.ferrule
     - match: '='
       scope: keyword.operator.assignment.ferrule
-    - match: '->|=>'
+    - match: '->'
       scope: keyword.operator.arrow.ferrule
+    - match: '\.\.\.'
+      scope: keyword.operator.spread.ferrule
     - match: '\?|:|\.(?!\d)'
       scope: keyword.operator.other.ferrule
     - match: '[(){}\[\];,]'
@@ -121,4 +125,3 @@ contexts:
   identifiers:
     - match: '\b[a-z_][a-zA-Z0-9_]*\b'
       scope: variable.other.ferrule
-

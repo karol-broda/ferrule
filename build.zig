@@ -9,6 +9,20 @@ pub fn build(b: *std.Build) void {
         .target = target,
     });
 
+    const runtime_mod = b.createModule(.{
+        .root_source_file = b.path("src/stdlib/runtime.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const runtime_lib = b.addLibrary(.{
+        .name = "ferrule_rt",
+        .root_module = runtime_mod,
+        .linkage = .static,
+    });
+    runtime_lib.linkLibC();
+    b.installArtifact(runtime_lib);
+
     const exe = b.addExecutable(.{
         .name = "ferrule",
         .root_module = b.createModule(.{
@@ -70,7 +84,6 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(exe);
 
-    // lsp server executable
     const lsp_exe = b.addExecutable(.{
         .name = "ferrule-lsp",
         .root_module = b.createModule(.{
@@ -100,7 +113,14 @@ pub fn build(b: *std.Build) void {
     });
     const run_exe_tests = b.addRunArtifact(exe_tests);
 
+    const runtime_tests = b.addTest(.{
+        .root_module = runtime_mod,
+    });
+    runtime_tests.linkLibC();
+    const run_runtime_tests = b.addRunArtifact(runtime_tests);
+
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
+    test_step.dependOn(&run_runtime_tests.step);
 }
