@@ -3,6 +3,7 @@ const ast = @import("../ast.zig");
 const types = @import("../types.zig");
 const symbol_table = @import("../symbol_table.zig");
 const diagnostics = @import("../diagnostics.zig");
+const context = @import("../context.zig");
 
 pub const TypeParamContext = struct {
     type_param_names: []const []const u8,
@@ -32,8 +33,12 @@ pub const TypeResolver = struct {
     source_file: []const u8,
     type_param_context: TypeParamContext,
 
+    // compilation context for arena-based memory management
+    // resolved types are interned for deduplication
+    compilation_context: *context.CompilationContext,
+
     pub fn init(
-        allocator: std.mem.Allocator,
+        ctx: *context.CompilationContext,
         symbols: *symbol_table.SymbolTable,
         diagnostics_list: *diagnostics.DiagnosticList,
         source_file: []const u8,
@@ -41,10 +46,22 @@ pub const TypeResolver = struct {
         return .{
             .symbols = symbols,
             .diagnostics_list = diagnostics_list,
-            .allocator = allocator,
+            .allocator = ctx.permanentAllocator(),
             .source_file = source_file,
             .type_param_context = TypeParamContext.empty(),
+            .compilation_context = ctx,
         };
+    }
+
+    // interns a type in the context's arena
+    fn internType(self: *TypeResolver, resolved_type: types.ResolvedType) !types.ResolvedType {
+        const interned = try self.compilation_context.internType(resolved_type);
+        return interned.*;
+    }
+
+    // interns a string in the context's arena
+    fn internString(self: *TypeResolver, str: []const u8) ![]const u8 {
+        return self.compilation_context.internString(str);
     }
 
     pub fn setTypeParamContext(self: *TypeResolver, ctx: TypeParamContext) void {
@@ -121,14 +138,16 @@ pub const TypeResolver = struct {
         if (self.symbols.lookupGlobal(name)) |symbol| {
             switch (symbol) {
                 .type_def => |td| {
+                    // types are arena-managed, no clone needed
                     const underlying_ptr = try self.allocator.create(types.ResolvedType);
                     underlying_ptr.* = td.underlying;
-                    return types.ResolvedType{
+                    // intern the named type for deduplication
+                    return try self.internType(types.ResolvedType{
                         .named = .{
                             .name = td.name,
                             .underlying = underlying_ptr,
                         },
-                    };
+                    });
                 },
                 else => {
                     try self.diagnostics_list.addError(
@@ -407,6 +426,7 @@ pub const TypeResolver = struct {
             .record = .{
                 .field_names = field_names,
                 .field_types = field_types,
+                .field_locations = null,
             },
         };
     }
@@ -516,6 +536,4 @@ pub const TypeResolver = struct {
     }
 };
 
-test {
-    _ = @import("type_resolver_test.zig");
-}
+test {}

@@ -37,7 +37,8 @@ pub const Theme = struct {
     true_color: bool,
 
     pub fn init() Theme {
-        if (std.process.hasEnvVarConstant("NO_COLOR")) {
+        // use runtime check for NO_COLOR, not comptime
+        if (std.posix.getenv("NO_COLOR") != null) {
             return .{ .enabled = false, .true_color = false };
         }
 

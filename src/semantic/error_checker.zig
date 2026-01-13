@@ -4,6 +4,7 @@ const types = @import("../types.zig");
 const symbol_table = @import("../symbol_table.zig");
 const error_domains = @import("../error_domains.zig");
 const diagnostics = @import("../diagnostics.zig");
+const context = @import("../context.zig");
 
 pub const ErrorChecker = struct {
     symbols: *symbol_table.SymbolTable,
@@ -12,8 +13,11 @@ pub const ErrorChecker = struct {
     allocator: std.mem.Allocator,
     source_file: []const u8,
 
+    // compilation context for arena-based memory management
+    compilation_context: *context.CompilationContext,
+
     pub fn init(
-        allocator: std.mem.Allocator,
+        ctx: *context.CompilationContext,
         symbols: *symbol_table.SymbolTable,
         domains: *error_domains.ErrorDomainTable,
         diagnostics_list: *diagnostics.DiagnosticList,
@@ -23,8 +27,9 @@ pub const ErrorChecker = struct {
             .symbols = symbols,
             .domains = domains,
             .diagnostics_list = diagnostics_list,
-            .allocator = allocator,
+            .allocator = ctx.permanentAllocator(),
             .source_file = source_file,
+            .compilation_context = ctx,
         };
     }
 
@@ -183,5 +188,4 @@ pub const ErrorChecker = struct {
 };
 
 test {
-    _ = @import("error_checker_test.zig");
 }

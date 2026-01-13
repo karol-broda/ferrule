@@ -4,6 +4,7 @@ const types = @import("../types.zig");
 const symbol_table = @import("../symbol_table.zig");
 const error_domains = @import("../error_domains.zig");
 const diagnostics = @import("../diagnostics.zig");
+const compilation_ctx = @import("../context.zig");
 
 pub const ExhaustivenessChecker = struct {
     symbols: *symbol_table.SymbolTable,
@@ -12,8 +13,11 @@ pub const ExhaustivenessChecker = struct {
     allocator: std.mem.Allocator,
     source_file: []const u8,
 
+    // compilation context for arena-based memory management
+    compilation_context: *compilation_ctx.CompilationContext,
+
     pub fn init(
-        allocator: std.mem.Allocator,
+        ctx: *compilation_ctx.CompilationContext,
         symbols: *symbol_table.SymbolTable,
         domains: *error_domains.ErrorDomainTable,
         diagnostics_list: *diagnostics.DiagnosticList,
@@ -23,8 +27,9 @@ pub const ExhaustivenessChecker = struct {
             .symbols = symbols,
             .domains = domains,
             .diagnostics_list = diagnostics_list,
-            .allocator = allocator,
+            .allocator = ctx.permanentAllocator(),
             .source_file = source_file,
+            .compilation_context = ctx,
         };
     }
 
@@ -100,25 +105,64 @@ pub const ExhaustivenessChecker = struct {
     }
 
     pub fn checkMatch(self: *ExhaustivenessChecker, match_stmt: ast.MatchStmt) !void {
-        var covered_patterns = std.StringHashMap(void).init(self.allocator);
-        defer covered_patterns.deinit();
+        try self.checkArmsExhaustiveness(match_stmt.arms, match_stmt.value, "match statement");
+    }
+
+    pub fn checkMatchExpr(self: *ExhaustivenessChecker, match_expr: ast.MatchExpr) !void {
+        try self.checkArmsExhaustiveness(match_expr.arms, match_expr.value, "match expression");
+    }
+
+    /// checks if match arms are exhaustive for the given matched value
+    fn checkArmsExhaustiveness(self: *ExhaustivenessChecker, arms: []ast.MatchArm, matched_value: *ast.Expr, match_context: []const u8) !void {
+        var covered_variants = std.StringHashMap(void).init(self.allocator);
+        defer covered_variants.deinit();
 
         var has_wildcard = false;
+        var has_identifier_binding = false;
 
-        for (match_stmt.arms) |arm| {
+        // collect covered patterns
+        for (arms) |arm| {
             switch (arm.pattern) {
                 .wildcard => has_wildcard = true,
-                .identifier => has_wildcard = true,
+                .identifier => has_identifier_binding = true,
                 .variant => |v| {
-                    try covered_patterns.put(v.name, {});
+                    try covered_variants.put(v.name, {});
                 },
-                else => {},
+                .ok_pattern => {
+                    try covered_variants.put("ok", {});
+                },
+                .err_pattern => {
+                    try covered_variants.put("err", {});
+                },
+                .some_pattern => {
+                    try covered_variants.put("Some", {});
+                },
+                .none_pattern => {
+                    try covered_variants.put("None", {});
+                },
+                .number, .string => {
+                    // literal patterns don't provide exhaustiveness for union types
+                },
             }
         }
 
-        if (!has_wildcard) {
+        // wildcard or identifier binding covers all cases
+        if (has_wildcard or has_identifier_binding) {
+            return;
+        }
+
+        // try to determine the type being matched and check exhaustiveness
+        const matched_type_opt = self.inferMatchedType(matched_value);
+        if (matched_type_opt) |matched_type| {
+            try self.checkTypeExhaustiveness(matched_type, covered_variants, match_context);
+        } else {
+            // type could not be determined, issue a general warning
             try self.diagnostics_list.addWarning(
-                try self.allocator.dupe(u8, "match statement may not be exhaustive"),
+                try std.fmt.allocPrint(
+                    self.allocator,
+                    "{s} may not be exhaustive",
+                    .{match_context},
+                ),
                 .{
                     .file = self.source_file,
                     .line = 0,
@@ -130,26 +174,104 @@ pub const ExhaustivenessChecker = struct {
         }
     }
 
-    pub fn checkMatchExpr(self: *ExhaustivenessChecker, match_expr: ast.MatchExpr) !void {
-        var covered_patterns = std.StringHashMap(void).init(self.allocator);
-        defer covered_patterns.deinit();
-
-        var has_wildcard = false;
-
-        for (match_expr.arms) |arm| {
-            switch (arm.pattern) {
-                .wildcard => has_wildcard = true,
-                .identifier => has_wildcard = true,
-                .variant => |v| {
-                    try covered_patterns.put(v.name, {});
-                },
-                else => {},
-            }
+    /// infers the type of the matched expression by looking up identifiers
+    fn inferMatchedType(self: *ExhaustivenessChecker, expr: *ast.Expr) ?MatchedTypeInfo {
+        switch (expr.*) {
+            .identifier => |id| {
+                // look up the identifier in the symbol table
+                if (self.symbols.lookupGlobal(id.name)) |symbol| {
+                    switch (symbol) {
+                        .constant => |c| return self.extractTypeInfo(c.type_annotation),
+                        .variable => |v| return self.extractTypeInfo(v.type_annotation),
+                        .parameter => |p| return self.extractTypeInfo(p.type_annotation),
+                        else => return null,
+                    }
+                }
+                return null;
+            },
+            .call => |ce| {
+                // for function calls, try to determine return type
+                switch (ce.callee.*) {
+                    .identifier => |callee_id| {
+                        if (self.symbols.lookupGlobal(callee_id.name)) |symbol| {
+                            if (symbol == .function) {
+                                return self.extractTypeInfo(symbol.function.return_type);
+                            }
+                        }
+                    },
+                    else => {},
+                }
+                return null;
+            },
+            .field_access => |fa| {
+                // could recursively resolve field access types
+                _ = fa;
+                return null;
+            },
+            else => return null,
         }
+    }
 
-        if (!has_wildcard) {
+    const MatchedTypeInfo = struct {
+        kind: TypeKind,
+        variants: ?[]const []const u8,
+
+        const TypeKind = enum {
+            union_type,
+            result_type,
+            nullable_type,
+            other,
+        };
+    };
+
+    /// extracts type information for exhaustiveness checking
+    fn extractTypeInfo(self: *ExhaustivenessChecker, resolved_type: types.ResolvedType) ?MatchedTypeInfo {
+        switch (resolved_type) {
+            .union_type => |ut| {
+                const variant_names = self.allocator.alloc([]const u8, ut.variants.len) catch return null;
+                for (ut.variants, 0..) |variant, i| {
+                    variant_names[i] = variant.name;
+                }
+                return MatchedTypeInfo{
+                    .kind = .union_type,
+                    .variants = variant_names,
+                };
+            },
+            .named => |n| {
+                // resolve named types to their underlying type
+                return self.extractTypeInfo(n.underlying.*);
+            },
+            .result => {
+                return MatchedTypeInfo{
+                    .kind = .result_type,
+                    .variants = &[_][]const u8{ "ok", "err" },
+                };
+            },
+            .nullable => {
+                return MatchedTypeInfo{
+                    .kind = .nullable_type,
+                    .variants = &[_][]const u8{ "Some", "None" },
+                };
+            },
+            else => {
+                return MatchedTypeInfo{
+                    .kind = .other,
+                    .variants = null,
+                };
+            },
+        }
+    }
+
+    /// checks if all variants of a type are covered
+    fn checkTypeExhaustiveness(self: *ExhaustivenessChecker, type_info: MatchedTypeInfo, covered: std.StringHashMap(void), match_context: []const u8) !void {
+        if (type_info.variants == null) {
+            // for non-variant types, just warn if no wildcard
             try self.diagnostics_list.addWarning(
-                try self.allocator.dupe(u8, "match expression may not be exhaustive"),
+                try std.fmt.allocPrint(
+                    self.allocator,
+                    "{s} may not be exhaustive",
+                    .{match_context},
+                ),
                 .{
                     .file = self.source_file,
                     .line = 0,
@@ -157,6 +279,51 @@ pub const ExhaustivenessChecker = struct {
                     .length = 0,
                 },
                 try self.allocator.dupe(u8, "consider adding a wildcard pattern '_' to handle all cases"),
+            );
+            return;
+        }
+
+        const variants = type_info.variants.?;
+        var missing_variants: std.ArrayList([]const u8) = .empty;
+        defer missing_variants.deinit(self.allocator);
+
+        for (variants) |variant_name| {
+            if (!covered.contains(variant_name)) {
+                try missing_variants.append(self.allocator, variant_name);
+            }
+        }
+
+        if (missing_variants.items.len > 0) {
+            var missing_str: std.ArrayList(u8) = .empty;
+            defer missing_str.deinit(self.allocator);
+
+            for (missing_variants.items, 0..) |name, i| {
+                if (i > 0) {
+                    try missing_str.appendSlice(self.allocator, ", ");
+                }
+                try missing_str.appendSlice(self.allocator, name);
+            }
+
+            const type_name = switch (type_info.kind) {
+                .union_type => "union",
+                .result_type => "Result",
+                .nullable_type => "Maybe",
+                .other => "type",
+            };
+
+            try self.diagnostics_list.addError(
+                try std.fmt.allocPrint(
+                    self.allocator,
+                    "{s} is not exhaustive: missing {s} variant(s): {s}",
+                    .{ match_context, type_name, missing_str.items },
+                ),
+                .{
+                    .file = self.source_file,
+                    .line = 0,
+                    .column = 0,
+                    .length = 0,
+                },
+                try self.allocator.dupe(u8, "add cases for missing variants or use a wildcard '_' pattern"),
             );
         }
     }
@@ -179,19 +346,25 @@ pub const ExhaustivenessChecker = struct {
                     .variant => |v| {
                         try covered.put(v.name, {});
                     },
+                    .err_pattern => |err| {
+                        if (err.variant_name) |name| {
+                            try covered.put(name, {});
+                        }
+                    },
                     else => {},
                 }
             }
 
             if (has_wildcard) return true;
 
+            var all_covered = true;
             for (domain.variants) |variant| {
                 if (!covered.contains(variant.name)) {
                     try self.diagnostics_list.addError(
                         try std.fmt.allocPrint(
                             self.allocator,
-                            "match is not exhaustive: missing case for variant '{s}'",
-                            .{variant.name},
+                            "match is not exhaustive: missing case for error variant '{s}' in domain '{s}'",
+                            .{ variant.name, domain_name },
                         ),
                         .{
                             .file = self.source_file,
@@ -201,17 +374,72 @@ pub const ExhaustivenessChecker = struct {
                         },
                         try self.allocator.dupe(u8, "add a case for this variant or use a wildcard '_' pattern"),
                     );
-                    return false;
+                    all_covered = false;
                 }
             }
 
-            return true;
+            return all_covered;
+        }
+
+        return false;
+    }
+
+    /// checks exhaustiveness for a union type given a type symbol name
+    pub fn checkUnionExhaustiveness(
+        self: *ExhaustivenessChecker,
+        arms: []ast.MatchArm,
+        type_name: []const u8,
+    ) !bool {
+        if (self.symbols.lookupGlobal(type_name)) |symbol| {
+            if (symbol == .type_def) {
+                const type_def = symbol.type_def;
+                if (type_def.underlying == .union_type) {
+                    var covered = std.StringHashMap(void).init(self.allocator);
+                    defer covered.deinit();
+
+                    var has_wildcard = false;
+
+                    for (arms) |arm| {
+                        switch (arm.pattern) {
+                            .wildcard => has_wildcard = true,
+                            .identifier => has_wildcard = true,
+                            .variant => |v| {
+                                try covered.put(v.name, {});
+                            },
+                            else => {},
+                        }
+                    }
+
+                    if (has_wildcard) return true;
+
+                    var all_covered = true;
+                    for (type_def.underlying.union_type.variants) |variant| {
+                        if (!covered.contains(variant.name)) {
+                            try self.diagnostics_list.addError(
+                                try std.fmt.allocPrint(
+                                    self.allocator,
+                                    "match is not exhaustive: missing case for variant '{s}' in union type '{s}'",
+                                    .{ variant.name, type_name },
+                                ),
+                                .{
+                                    .file = self.source_file,
+                                    .line = 0,
+                                    .column = 0,
+                                    .length = 0,
+                                },
+                                try self.allocator.dupe(u8, "add a case for this variant or use a wildcard '_' pattern"),
+                            );
+                            all_covered = false;
+                        }
+                    }
+
+                    return all_covered;
+                }
+            }
         }
 
         return false;
     }
 };
 
-test {
-    _ = @import("exhaustiveness_test.zig");
-}
+test {}

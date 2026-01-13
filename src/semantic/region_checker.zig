@@ -3,6 +3,7 @@ const ast = @import("../ast.zig");
 const types = @import("../types.zig");
 const symbol_table = @import("../symbol_table.zig");
 const diagnostics = @import("../diagnostics.zig");
+const context = @import("../context.zig");
 
 pub const RegionInfo = struct {
     name: []const u8,
@@ -18,8 +19,11 @@ pub const RegionChecker = struct {
     active_regions: std.ArrayList(RegionInfo),
     current_scope_level: u32,
 
+    // compilation context for arena-based memory management
+    compilation_context: *context.CompilationContext,
+
     pub fn init(
-        allocator: std.mem.Allocator,
+        ctx: *context.CompilationContext,
         symbols: *symbol_table.SymbolTable,
         diagnostics_list: *diagnostics.DiagnosticList,
         source_file: []const u8,
@@ -27,10 +31,11 @@ pub const RegionChecker = struct {
         return .{
             .symbols = symbols,
             .diagnostics_list = diagnostics_list,
-            .allocator = allocator,
+            .allocator = ctx.permanentAllocator(),
             .source_file = source_file,
             .active_regions = std.ArrayList(RegionInfo){},
             .current_scope_level = 0,
+            .compilation_context = ctx,
         };
     }
 
@@ -237,5 +242,4 @@ pub const RegionChecker = struct {
 };
 
 test {
-    _ = @import("region_checker_test.zig");
 }

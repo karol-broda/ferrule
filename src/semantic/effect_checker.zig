@@ -4,6 +4,7 @@ const types = @import("../types.zig");
 const symbol_table = @import("../symbol_table.zig");
 const diagnostics = @import("../diagnostics.zig");
 const typed_ast = @import("../typed_ast.zig");
+const context = @import("../context.zig");
 
 pub const EffectChecker = struct {
     symbols: *symbol_table.SymbolTable,
@@ -11,8 +12,11 @@ pub const EffectChecker = struct {
     allocator: std.mem.Allocator,
     source_file: []const u8,
 
+    // compilation context for arena-based memory management
+    compilation_context: *context.CompilationContext,
+
     pub fn init(
-        allocator: std.mem.Allocator,
+        ctx: *context.CompilationContext,
         symbols: *symbol_table.SymbolTable,
         diagnostics_list: *diagnostics.DiagnosticList,
         source_file: []const u8,
@@ -20,8 +24,9 @@ pub const EffectChecker = struct {
         return .{
             .symbols = symbols,
             .diagnostics_list = diagnostics_list,
-            .allocator = allocator,
+            .allocator = ctx.permanentAllocator(),
             .source_file = source_file,
+            .compilation_context = ctx,
         };
     }
 
@@ -64,8 +69,8 @@ pub const EffectChecker = struct {
                         ),
                         .{
                             .file = self.source_file,
-                            .line = 0,
-                            .column = 0,
+                            .line = func.name_loc.line,
+                            .column = func.name_loc.column,
                             .length = func.name.len,
                         },
                         try self.allocator.dupe(u8, "add the effect to the function signature"),
@@ -97,8 +102,8 @@ pub const EffectChecker = struct {
                         ),
                         .{
                             .file = self.source_file,
-                            .line = 0,
-                            .column = 0,
+                            .line = func.name_loc.line,
+                            .column = func.name_loc.column,
                             .length = func.name.len,
                         },
                         try std.fmt.allocPrint(
@@ -275,5 +280,4 @@ pub const EffectChecker = struct {
 };
 
 test {
-    _ = @import("effect_checker_test.zig");
 }

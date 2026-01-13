@@ -1,0 +1,152 @@
+package example.union_matching;
+
+// define a simple union type with variants
+type Shape =
+  | Circle { radius: f64 }
+  | Rect { width: f64, height: f64 }
+  | Point;
+
+// define a union for result-like behavior
+// NOTE: String payloads not yet supported in codegen, using i32 error code instead
+type Status =
+  | Ok
+  | Error { code: i32 };
+
+// function that creates a shape
+function create_circle(r: f64) -> Shape {
+  return Circle { radius: r };
+}
+
+function create_rect(w: f64, h: f64) -> Shape {
+  return Rect { width: w, height: h };
+}
+
+function create_point() -> Shape {
+  return Point;
+}
+
+// function that uses match on union variants
+function describe_shape(cap io: Io, shape: Shape) -> i32 effects [io] {
+  const result = match shape {
+    Circle { radius } -> {
+      print("circle with radius: ");
+      print_f64(radius);
+      print_newline();
+      1
+    };
+    Rect { width, height } -> {
+      print("rectangle ");
+      print_f64(width);
+      print(" x ");
+      print_f64(height);
+      print_newline();
+      2
+    };
+    Point -> {
+      println("point (no dimensions)");
+      3
+    };
+  };
+  return result;
+}
+
+// function demonstrating match with wildcard
+function is_circle(cap io: Io, shape: Shape) -> i32 effects [io] {
+  const result = match shape {
+    Circle { radius } -> {
+      print("found circle with radius ");
+      print_f64(radius);
+      print_newline();
+      1
+    };
+    _ -> {
+      println("not a circle");
+      0
+    };
+  };
+  return result;
+}
+
+// function demonstrating status matching
+function handle_status(cap io: Io, status: Status) -> i32 effects [io] {
+  return match status {
+    Ok -> {
+      println("operation succeeded");
+      0
+    };
+    Error { code } -> {
+      print("error code: ");
+      print_i32(code);
+      print_newline();
+      1
+    };
+  };
+}
+
+function main(cap io: Io) -> i32 effects [io] {
+  println("=== union variant matching examples ===");
+  println("");
+
+  // example 1: basic variant matching
+  println("1. basic variant matching:");
+  const c = create_circle(3.14);
+  const r = create_rect(10.0, 5.0);
+  const p = create_point();
+
+  const c_desc = describe_shape(io, c);
+  const r_desc = describe_shape(io, r);
+  const p_desc = describe_shape(io, p);
+
+  print("   circle result: ");
+  print_i32(c_desc);
+  print_newline();
+  print("   rect result: ");
+  print_i32(r_desc);
+  print_newline();
+  print("   point result: ");
+  print_i32(p_desc);
+  print_newline();
+  println("");
+
+  // example 2: match with wildcard pattern
+  println("2. match with wildcard:");
+  const is_c1 = is_circle(io, c);
+  const is_c2 = is_circle(io, r);
+  print("   circle is_circle: ");
+  print_i32(is_c1);
+  print_newline();
+  print("   rect is_circle: ");
+  print_i32(is_c2);
+  print_newline();
+  println("");
+
+  // example 3: inline match expression
+  println("3. inline match expression:");
+  const shape_code = match c {
+    Circle { radius } -> 100;
+    Rect { width, height } -> 200;
+    Point -> 300;
+  };
+  print("   shape code for circle: ");
+  print_i32(shape_code);
+  print_newline();
+  println("");
+
+  // example 4: status variant matching
+  println("4. status variant matching:");
+  const ok_status = Ok;
+  const err_status = Error { code: 42 };
+
+  const ok_result = handle_status(io, ok_status);
+  const err_result = handle_status(io, err_status);
+  print("   ok status result: ");
+  print_i32(ok_result);
+  print_newline();
+  print("   error status result: ");
+  print_i32(err_result);
+  print_newline();
+  println("");
+
+  println("=== all union matching examples completed ===");
+  return 0;
+}

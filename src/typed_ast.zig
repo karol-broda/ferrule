@@ -8,8 +8,8 @@ pub const TypedExpr = struct {
     effects: []types.Effect,
     allocator: std.mem.Allocator,
 
+    // types are interned via CompilationContext; only effects need explicit cleanup
     pub fn deinit(self: *TypedExpr) void {
-        self.resolved_type.deinit(self.allocator);
         self.allocator.free(self.effects);
     }
 };
@@ -19,10 +19,9 @@ pub const TypedStmt = struct {
     type_info: ?types.ResolvedType,
     allocator: std.mem.Allocator,
 
+    // types are arena-managed, no cleanup needed
     pub fn deinit(self: *TypedStmt) void {
-        if (self.type_info) |*ti| {
-            ti.deinit(self.allocator);
-        }
+        _ = self;
     }
 };
 

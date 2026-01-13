@@ -1,4 +1,5 @@
 const std = @import("std");
+const context = @import("context.zig");
 
 pub const LocationInfo = struct {
     line: usize,
@@ -22,25 +23,34 @@ pub const SymbolLocationTable = struct {
     symbols: std.StringHashMap(SymbolLocation),
     allocator: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator) SymbolLocationTable {
+    // compilation context for interning
+    // strings are borrowed from the context's arena
+    compilation_context: *context.CompilationContext,
+
+    pub fn init(ctx: *context.CompilationContext) SymbolLocationTable {
         return .{
-            .symbols = std.StringHashMap(SymbolLocation).init(allocator),
-            .allocator = allocator,
+            .symbols = std.StringHashMap(SymbolLocation).init(ctx.permanentAllocator()),
+            .allocator = ctx.permanentAllocator(),
+            .compilation_context = ctx,
         };
     }
 
     pub fn deinit(self: *SymbolLocationTable) void {
+        // arena cleanup handles string memory; only hashmap and arraylist structures need explicit cleanup
         var iter = self.symbols.iterator();
         while (iter.next()) |entry| {
-            var symbol = entry.value_ptr;
-            symbol.deinit();
+            entry.value_ptr.references.deinit(self.allocator);
         }
         self.symbols.deinit();
     }
 
+    // interns a string in the context's arena
+    fn internString(self: *SymbolLocationTable, str: []const u8) ![]const u8 {
+        return self.compilation_context.internString(str);
+    }
+
     pub fn addDefinition(self: *SymbolLocationTable, name: []const u8, line: usize, column: usize, length: usize) !void {
-        const name_copy = try self.allocator.dupe(u8, name);
-        errdefer self.allocator.free(name_copy);
+        const name_copy = try self.internString(name);
 
         const symbol = SymbolLocation{
             .name = name_copy,
@@ -64,8 +74,8 @@ pub const SymbolLocationTable = struct {
                 .length = length,
             });
         } else {
-            const name_copy = try self.allocator.dupe(u8, name);
-            errdefer self.allocator.free(name_copy);
+            const name_copy = try self.internString(name);
+            // note: no errdefer free needed when using interning (arena handles cleanup)
 
             var symbol = SymbolLocation{
                 .name = name_copy,

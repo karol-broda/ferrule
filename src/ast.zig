@@ -207,8 +207,26 @@ pub const Pattern = union(enum) {
     string: []const u8,
     variant: struct {
         name: []const u8,
-        fields: ?[]Pattern,
+        fields: ?[]PatternField,
     },
+    // result type patterns
+    ok_pattern: struct {
+        binding: ?[]const u8,
+    },
+    err_pattern: struct {
+        variant_name: ?[]const u8,
+        fields: ?[]PatternField,
+    },
+    // maybe type patterns
+    some_pattern: struct {
+        binding: ?[]const u8,
+    },
+    none_pattern: void,
+};
+
+pub const PatternField = struct {
+    name: []const u8,
+    pattern: ?*Pattern,
 };
 
 pub const IdentifierExpr = struct {
@@ -232,6 +250,7 @@ pub const Expr = union(enum) {
     index_access: IndexAccessExpr,
     array_literal: ArrayLiteralExpr,
     record_literal: RecordLiteralExpr,
+    variant_constructor: VariantConstructorExpr,
     range: RangeExpr,
     ok: *Expr,
     err: ErrorExpr,
@@ -243,6 +262,7 @@ pub const Expr = union(enum) {
     unsafe_cast: UnsafeCastExpr,
     comptime_expr: *Expr,
     context_block: ContextBlockExpr,
+    block_expr: BlockExpr,
 
     // returns location if available from the expression, including length when possible
     pub fn getLocation(self: *const Expr) ?Location {
@@ -265,6 +285,11 @@ pub const Expr = union(enum) {
             .match_expr => |m| m.value.getLocation(),
             .unsafe_cast => |uc| uc.expr.getLocation(),
             .comptime_expr => |ce| ce.getLocation(),
+            .variant_constructor => |vc| .{
+                .line = vc.name_loc.line,
+                .column = vc.name_loc.column,
+                .length = vc.variant_name.len,
+            },
             else => null,
         };
     }
@@ -327,6 +352,7 @@ pub const CallExpr = struct {
 pub const FieldAccessExpr = struct {
     object: *Expr,
     field: []const u8,
+    field_loc: Location,
 };
 
 pub const IndexAccessExpr = struct {
@@ -338,8 +364,15 @@ pub const RecordLiteralExpr = struct {
     fields: []FieldAssignment,
 };
 
+pub const VariantConstructorExpr = struct {
+    variant_name: []const u8,
+    fields: ?[]FieldAssignment,
+    name_loc: Location,
+};
+
 pub const FieldAssignment = struct {
     name: []const u8,
+    name_loc: Location,
     value: *Expr,
 };
 
@@ -372,6 +405,13 @@ pub const ContextBlockExpr = struct {
     body: []Stmt,
 };
 
+// block expression: { stmt1; stmt2; ...; result_expr }
+// the last expression in the block is the result value
+pub const BlockExpr = struct {
+    statements: []Stmt,
+    result_expr: ?*Expr, // final expression that produces the block's value
+};
+
 pub const CheckExpr = struct {
     expr: *Expr,
     context_frame: ?[]FieldAssignment,
@@ -401,8 +441,10 @@ pub const ImportDecl = struct {
     items: []ImportItem,
     capability: ?[]const u8,
 
+    // no-op: memory is arena-managed
     pub fn deinit(self: *const ImportDecl, allocator: std.mem.Allocator) void {
-        allocator.free(self.items);
+        _ = self;
+        _ = allocator;
     }
 };
 
@@ -411,313 +453,39 @@ pub const Module = struct {
     imports: []ImportDecl,
     statements: []Stmt,
 
+    // no-op: memory is arena-managed
     pub fn deinit(self: *const Module, allocator: std.mem.Allocator) void {
-        if (self.package_decl) |pd| {
-            allocator.free(pd.name);
-        }
-
-        for (self.imports) |import_decl| {
-            allocator.free(import_decl.items);
-        }
-        allocator.free(self.imports);
-
-        for (self.statements) |stmt| {
-            deinitStmt(&stmt, allocator);
-        }
-        allocator.free(self.statements);
+        _ = self;
+        _ = allocator;
     }
 };
 
+// no-op: memory is arena-managed
 pub fn deinitStmt(stmt: *const Stmt, allocator: std.mem.Allocator) void {
-    switch (stmt.*) {
-        .const_decl => |cd| {
-            if (cd.type_annotation) |ta| {
-                deinitType(&ta, allocator);
-            }
-            deinitExpr(cd.value, allocator);
-        },
-        .var_decl => |vd| {
-            if (vd.type_annotation) |ta| {
-                deinitType(&ta, allocator);
-            }
-            deinitExpr(vd.value, allocator);
-        },
-        .function_decl => |fd| {
-            if (fd.type_params) |tps| {
-                for (tps) |tp| {
-                    if (tp.constraint) |c| {
-                        deinitType(&c, allocator);
-                    }
-                    if (tp.const_type) |ct| {
-                        deinitType(&ct, allocator);
-                    }
-                }
-                allocator.free(tps);
-            }
-            for (fd.params) |param| {
-                deinitType(&param.type_annotation, allocator);
-            }
-            allocator.free(fd.params);
-            deinitType(&fd.return_type, allocator);
-            allocator.free(fd.effects);
-            for (fd.body) |body_stmt| {
-                deinitStmt(&body_stmt, allocator);
-            }
-            allocator.free(fd.body);
-        },
-        .type_decl => |td| {
-            deinitType(&td.type_expr, allocator);
-        },
-        .error_decl => |ed| {
-            for (ed.fields) |field| {
-                deinitType(&field.type_annotation, allocator);
-            }
-            allocator.free(ed.fields);
-        },
-        .domain_decl => |dd| {
-            if (dd.error_union) |eu| {
-                allocator.free(eu);
-            }
-            if (dd.variants) |variants| {
-                for (variants) |variant| {
-                    for (variant.fields) |field| {
-                        deinitType(&field.type_annotation, allocator);
-                    }
-                    allocator.free(variant.fields);
-                }
-                allocator.free(variants);
-            }
-        },
-        .return_stmt => |return_stmt| {
-            if (return_stmt.value) |expr| {
-                deinitExpr(expr, allocator);
-            }
-        },
-        .defer_stmt => |expr| {
-            deinitExpr(expr, allocator);
-        },
-        .expr_stmt => |expr| {
-            deinitExpr(expr, allocator);
-        },
-        .assign_stmt => |as| {
-            deinitExpr(as.value, allocator);
-        },
-        .if_stmt => |is| {
-            deinitExpr(is.condition, allocator);
-            for (is.then_block) |then_stmt| {
-                deinitStmt(&then_stmt, allocator);
-            }
-            allocator.free(is.then_block);
-            if (is.else_block) |eb| {
-                for (eb) |else_stmt| {
-                    deinitStmt(&else_stmt, allocator);
-                }
-                allocator.free(eb);
-            }
-        },
-        .while_stmt => |ws| {
-            deinitExpr(ws.condition, allocator);
-            for (ws.body) |body_stmt| {
-                deinitStmt(&body_stmt, allocator);
-            }
-            allocator.free(ws.body);
-        },
-        .for_stmt => |fs| {
-            deinitExpr(fs.iterable, allocator);
-            for (fs.body) |body_stmt| {
-                deinitStmt(&body_stmt, allocator);
-            }
-            allocator.free(fs.body);
-        },
-        .match_stmt => |ms| {
-            deinitExpr(ms.value, allocator);
-            for (ms.arms) |arm| {
-                deinitPattern(&arm.pattern, allocator);
-                deinitExpr(arm.body, allocator);
-            }
-            allocator.free(ms.arms);
-        },
-        .break_stmt, .continue_stmt, .use_error => {},
-        .package_decl, .import_decl => {},
-    }
+    _ = stmt;
+    _ = allocator;
 }
 
-pub fn deinitExpr(expr: *const Expr, allocator: std.mem.Allocator) void {
-    switch (expr.*) {
-        .binary => |be| {
-            deinitExpr(be.left, allocator);
-            deinitExpr(be.right, allocator);
-        },
-        .unary => |ue| {
-            deinitExpr(ue.operand, allocator);
-        },
-        .call => |ce| {
-            deinitExpr(ce.callee, allocator);
-            for (ce.args) |arg| {
-                deinitExpr(arg, allocator);
-            }
-            allocator.free(ce.args);
-        },
-        .field_access => |fa| {
-            deinitExpr(fa.object, allocator);
-        },
-        .index_access => |ia| {
-            deinitExpr(ia.object, allocator);
-            deinitExpr(ia.index, allocator);
-        },
-        .ok => |ok_expr| {
-            deinitExpr(ok_expr, allocator);
-        },
-        .err => |ee| {
-            for (ee.fields) |field| {
-                deinitExpr(field.value, allocator);
-            }
-            allocator.free(ee.fields);
-        },
-        .check => |ce| {
-            deinitExpr(ce.expr, allocator);
-            if (ce.context_frame) |cf| {
-                for (cf) |field| {
-                    deinitExpr(field.value, allocator);
-                }
-                allocator.free(cf);
-            }
-        },
-        .ensure => |ee| {
-            deinitExpr(ee.condition, allocator);
-            for (ee.error_expr.fields) |field| {
-                deinitExpr(field.value, allocator);
-            }
-            allocator.free(ee.error_expr.fields);
-        },
-        .map_error => |me| {
-            deinitExpr(me.expr, allocator);
-            deinitExpr(me.transform, allocator);
-        },
-        .match_expr => |me| {
-            deinitExpr(me.value, allocator);
-            for (me.arms) |arm| {
-                deinitPattern(&arm.pattern, allocator);
-                deinitExpr(arm.body, allocator);
-            }
-            allocator.free(me.arms);
-        },
-        .array_literal => |al| {
-            for (al.elements) |elem| {
-                deinitExpr(elem, allocator);
-            }
-            allocator.free(al.elements);
-        },
-        .record_literal => |rl| {
-            for (rl.fields) |field| {
-                deinitExpr(field.value, allocator);
-            }
-            allocator.free(rl.fields);
-        },
-        .anonymous_function => |af| {
-            for (af.params) |param| {
-                deinitType(&param.type_annotation, allocator);
-            }
-            allocator.free(af.params);
-            deinitType(&af.return_type, allocator);
-            allocator.free(af.effects);
-            for (af.body) |body_stmt| {
-                deinitStmt(&body_stmt, allocator);
-            }
-            allocator.free(af.body);
-        },
-        .unsafe_cast => |uc| {
-            deinitType(&uc.target_type, allocator);
-            deinitExpr(uc.expr, allocator);
-        },
-        .comptime_expr => |ce| {
-            deinitExpr(ce, allocator);
-        },
-        .context_block => |cb| {
-            for (cb.context_items) |item| {
-                deinitExpr(item.value, allocator);
-            }
-            allocator.free(cb.context_items);
-            for (cb.body) |body_stmt| {
-                deinitStmt(&body_stmt, allocator);
-            }
-            allocator.free(cb.body);
-        },
-        .range => |r| {
-            deinitExpr(r.start, allocator);
-            deinitExpr(r.end, allocator);
-        },
-        .number, .string, .bytes, .char, .identifier, .bool_literal, .null_literal, .unit_literal => {},
-    }
-    allocator.destroy(expr);
+// no-op: memory is arena-managed
+pub fn deinitExpr(expr: *Expr, allocator: std.mem.Allocator) void {
+    _ = expr;
+    _ = allocator;
 }
 
+// no-op: memory is arena-managed
 pub fn deinitType(type_expr: *const Type, allocator: std.mem.Allocator) void {
-    switch (type_expr.*) {
-        .simple => {},
-        .generic => |gen| {
-            for (gen.type_args) |*arg| {
-                deinitType(arg, allocator);
-            }
-            allocator.free(gen.type_args);
-        },
-        .array => |arr| {
-            deinitType(arr.element_type, allocator);
-            allocator.destroy(arr.element_type);
-            deinitExpr(arr.size, allocator);
-        },
-        .vector => |vec| {
-            deinitType(vec.element_type, allocator);
-            allocator.destroy(vec.element_type);
-            deinitExpr(vec.size, allocator);
-        },
-        .view => |view| {
-            deinitType(view.element_type, allocator);
-            allocator.destroy(view.element_type);
-        },
-        .nullable => |nullable| {
-            deinitType(nullable.inner, allocator);
-            allocator.destroy(nullable.inner);
-        },
-        .function_type => |ft| {
-            for (ft.params) |*param| {
-                deinitType(param, allocator);
-            }
-            allocator.free(ft.params);
-            deinitType(ft.return_type, allocator);
-            allocator.destroy(ft.return_type);
-            allocator.free(ft.effects);
-        },
-        .record_type => |rt| {
-            for (rt.fields) |field| {
-                deinitType(&field.type_annotation, allocator);
-            }
-            allocator.free(rt.fields);
-        },
-        .union_type => |ut| {
-            for (ut.variants) |variant| {
-                if (variant.fields) |fields| {
-                    for (fields) |field| {
-                        deinitType(&field.type_annotation, allocator);
-                    }
-                    allocator.free(fields);
-                }
-            }
-            allocator.free(ut.variants);
-        },
-    }
+    _ = type_expr;
+    _ = allocator;
 }
 
-fn deinitPattern(pattern: *const Pattern, allocator: std.mem.Allocator) void {
-    switch (pattern.*) {
-        .variant => |v| {
-            if (v.fields) |fields| {
-                for (fields) |field| {
-                    deinitPattern(&field, allocator);
-                }
-                allocator.free(fields);
-            }
-        },
-        .wildcard, .identifier, .number, .string => {},
-    }
+// no-op: memory is arena-managed
+fn deinitPatternField(field: *const PatternField, allocator: std.mem.Allocator) void {
+    _ = field;
+    _ = allocator;
+}
+
+// no-op: memory is arena-managed
+pub fn deinitPattern(pattern: *const Pattern, allocator: std.mem.Allocator) void {
+    _ = pattern;
+    _ = allocator;
 }

@@ -1,6 +1,19 @@
 //! By convention, root.zig is the root source file when making a library.
 const std = @import("std");
 
+// public exports for LSP and other consumers
+pub const diagnostics = @import("diagnostics.zig");
+pub const symbol_locations = @import("symbol_locations.zig");
+pub const hover_info = @import("hover_info.zig");
+pub const lexer = @import("lexer.zig");
+pub const parser = @import("parser.zig");
+pub const ast = @import("ast.zig");
+pub const semantic = @import("semantic.zig");
+pub const types = @import("types.zig");
+pub const symbol_table = @import("symbol_table.zig");
+pub const context = @import("context.zig");
+pub const logging = @import("logging.zig");
+
 // import semantic tests
 test {
     _ = @import("semantic/declaration_pass.zig");

@@ -1,0 +1,158 @@
+package example.error_propagation;
+
+domain MathError {
+  DivideByZero {}
+  NegativeValue { value: i32 }
+  OutOfRange { min: i32, max: i32 }
+}
+
+function safe_divide(a: i32, b: i32) -> i32 error MathError {
+  if b == 0 {
+    return err DivideByZero {};
+  }
+  return ok a / b;
+}
+
+function validate_positive(n: i32) -> i32 error MathError {
+  ensure n > 0 else err NegativeValue { value: n };
+  return ok n;
+}
+
+function validate_range(n: i32, min: i32, max: i32) -> i32 error MathError {
+  ensure n >= min else err OutOfRange { min: min, max: max };
+  ensure n <= max else err OutOfRange { min: min, max: max };
+  return ok n;
+}
+
+function compute_ratio(a: i32, b: i32) -> i32 error MathError {
+  const quotient = check safe_divide(a, b);
+  return ok quotient * 10;
+}
+
+function process_value(n: i32) -> i32 error MathError {
+  const validated = check validate_positive(n);
+  const ranged = check validate_range(validated, 1, 100);
+  const result = check safe_divide(ranged, 2);
+  return ok result;
+}
+
+function complex_calculation(a: i32, b: i32, c: i32) -> i32 error MathError {
+  const step1 = check safe_divide(a, b);
+  const step2 = check validate_positive(step1);
+  const step3 = check safe_divide(step2, c);
+  return ok step3;
+}
+
+function main(cap io: Io) -> i32 effects [io] {
+  println("=== error propagation examples ===");
+  println("");
+
+  println("1. basic ok/err construction:");
+
+  const r1 = safe_divide(10, 2);
+  print("   safe_divide(10, 2): ");
+  print_result_i32(r1.tag, r1.value, r1.error_code);
+  println("  // ok: 5");
+
+  const r2 = safe_divide(10, 0);
+  print("   safe_divide(10, 0): ");
+  print_result_i32(r2.tag, r2.value, r2.error_code);
+  println("  // err: DivideByZero");
+  println("");
+
+  println("2. ensure guard (early return on failure):");
+
+  const r3 = validate_positive(5);
+  print("   validate_positive(5): ");
+  print_result_i32(r3.tag, r3.value, r3.error_code);
+  println("  // ok: 5");
+
+  const r4 = validate_positive(0 - 3);
+  print("   validate_positive(-3): ");
+  print_result_i32(r4.tag, r4.value, r4.error_code);
+  println("  // err: NegativeValue");
+  println("");
+
+  // 3. range validation
+  println("3. range validation with multiple ensures:");
+
+  const r5 = validate_range(50, 1, 100);
+  print("   validate_range(50, 1, 100): ");
+  print_result_i32(r5.tag, r5.value, r5.error_code);
+  println("  // ok: 50");
+
+  const r6 = validate_range(150, 1, 100);
+  print("   validate_range(150, 1, 100): ");
+  print_result_i32(r6.tag, r6.value, r6.error_code);
+  println("  // err: OutOfRange");
+  println("");
+
+  println("4. check propagation (auto-unwrap or propagate):");
+
+  const r7 = compute_ratio(20, 4);
+  print("   compute_ratio(20, 4): ");
+  print_result_i32(r7.tag, r7.value, r7.error_code);
+  println("  // (20/4)*10 = ok: 50");
+
+  const r8 = compute_ratio(20, 0);
+  print("   compute_ratio(20, 0): ");
+  print_result_i32(r8.tag, r8.value, r8.error_code);
+  println("  // err: DivideByZero (propagated)");
+  println("");
+
+  println("5. chained propagation (multiple checks):");
+
+  const r9 = process_value(50);
+  print("   process_value(50): ");
+  print_result_i32(r9.tag, r9.value, r9.error_code);
+  println("  // 50 -> validate -> range -> /2 = ok: 25");
+
+  const r10 = process_value(0 - 10);
+  print("   process_value(-10): ");
+  print_result_i32(r10.tag, r10.value, r10.error_code);
+  println("  // fails at validate_positive");
+
+  const r11 = process_value(200);
+  print("   process_value(200): ");
+  print_result_i32(r11.tag, r11.value, r11.error_code);
+  println("  // fails at validate_range");
+  println("");
+
+  // 6. complex calculation
+  println("6. complex multi-step calculation:");
+
+  const r12 = complex_calculation(100, 5, 2);
+  print("   complex_calculation(100, 5, 2): ");
+  print_result_i32(r12.tag, r12.value, r12.error_code);
+  println("  // 100/5=20, 20/2=10 -> ok: 10");
+
+  const r13 = complex_calculation(100, 0, 2);
+  print("   complex_calculation(100, 0, 2): ");
+  print_result_i32(r13.tag, r13.value, r13.error_code);
+  println("  // err at first divide");
+
+  const r14 = complex_calculation(100, 50, 0);
+  print("   complex_calculation(100, 50, 0): ");
+  print_result_i32(r14.tag, r14.value, r14.error_code);
+  println("  // err at second divide");
+  println("");
+
+  // 7. debug helpers
+  println("7. debug print helpers:");
+  dbg_i32("the answer", 42);
+  dbg_bool("is_valid", true);
+  dbg_str("message", "hello");
+  println("");
+
+  // 8. debug result printing
+  println("8. debug result (one-liner for quick debugging):");
+  const r15 = safe_divide(100, 4);
+  dbg_result_i32("100 / 4", r15.tag, r15.value, r15.error_code);
+
+  const r16 = safe_divide(100, 0);
+  dbg_result_i32("100 / 0", r16.tag, r16.value, r16.error_code);
+  println("");
+
+  println("=== done ===");
+  return 0;
+}

@@ -1,0 +1,160 @@
+package example.pattern_matching;
+
+function main() -> i32 effects [io] {
+  println("=== pattern matching examples ===");
+  println("");
+
+  println("1. match expression on integers");
+
+  const day: i32 = 3;
+  const day_value = match day {
+    1 -> 10;
+    2 -> 20;
+    3 -> 30;
+    4 -> 40;
+    5 -> 50;
+    6 -> 60;
+    7 -> 70;
+    _ -> 0;
+  };
+  print("   day 3 value: ");
+  print_i32(day_value);
+  print_newline();
+
+  println("2. match with wildcard pattern");
+
+  const score: i32 = 85;
+  const grade = match score {
+    100 -> 5;
+    90 -> 4;
+    80 -> 3;
+    70 -> 2;
+    _ -> 1;
+  };
+  print("   score 85 grade level: ");
+  print_i32(grade);
+  print_newline();
+
+  println("3. match with expressions in arms");
+
+  const x: i32 = 7;
+  const computed = match x {
+    0 -> 0;
+    1 -> 10;
+    _ -> x * 10 + 5;
+  };
+  print("   x=7 computed: ");
+  print_i32(computed);
+  print_newline();
+
+  println("4. nested match expressions");
+
+  const outer: i32 = 1;
+  const inner: i32 = 2;
+  const nested_result = match outer {
+    0 -> 0;
+    1 -> match inner {
+      1 -> 100;
+      2 -> 200;
+      _ -> 300;
+    };
+    _ -> 999;
+  };
+  print("   outer=1, inner=2 -> ");
+  print_i32(nested_result);
+  print_newline();
+
+  // --------------------------------------------------------
+  // example 5: match for control flow decisions
+  // --------------------------------------------------------
+  println("5. match for control flow");
+
+  const status_code: i32 = 200;
+  const is_success = match status_code {
+    200 -> 1;
+    201 -> 1;
+    204 -> 1;
+    _ -> 0;
+  };
+  print("   status 200 is success: ");
+  if is_success == 1 {
+    println("true");
+  } else {
+    println("false");
+  }
+
+  // --------------------------------------------------------
+  // example 6: match as value mapper
+  // --------------------------------------------------------
+  println("6. match as value mapper");
+
+  const input: i32 = 3;
+  const squared = match input {
+    1 -> 1;
+    2 -> 4;
+    3 -> 9;
+    4 -> 16;
+    5 -> 25;
+    _ -> input * input;
+  };
+  print("   3 squared: ");
+  print_i32(squared);
+  print_newline();
+
+  println("7. match on zero");
+
+  const num: i32 = 0;
+  const mapped = match num {
+    0 -> 42;
+    _ -> 999;
+  };
+  print("   num=0 mapped to: ");
+  print_i32(mapped);
+  print_newline();
+
+  println("8. match with negative values");
+
+  const code: i32 = 404;
+  const error_val = match code {
+    200 -> 0;
+    404 -> 0 - 1;
+    500 -> 0 - 2;
+    _ -> 0 - 999;
+  };
+  print("   code 404 error value: ");
+  print_i32(error_val);
+  print_newline();
+
+  println("9. chained match expressions");
+
+  const a: i32 = 2;
+  const step1 = match a {
+    1 -> 10;
+    2 -> 20;
+    _ -> 0;
+  };
+  const step2 = match step1 {
+    10 -> 100;
+    20 -> 200;
+    _ -> 0;
+  };
+  print("   a=2 -> step1=20 -> step2=");
+  print_i32(step2);
+  print_newline();
+
+  println("10. match for boolean logic");
+
+  const flag: i32 = 1;
+  const result = match flag {
+    0 -> 0;
+    _ -> 1;
+  };
+  print("   flag=1 is truthy: ");
+  print_i32(result);
+  print_newline();
+
+  println("");
+  println("=== all pattern matching examples completed ===");
+
+  return 0;
+}

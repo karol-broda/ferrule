@@ -1,0 +1,94 @@
+package example.union_simple;
+
+// simple union type with variants
+type Option =
+  | Just { value: i32 }
+  | Nothing;
+
+// function that creates a Just variant
+function make_just(v: i32) -> Option {
+  return Just { value: v };
+}
+
+// function that creates a Nothing variant
+function make_nothing() -> Option {
+  return Nothing;
+}
+
+// function that uses match on union variants
+function unwrap_or(opt: Option, default_val: i32) -> i32 {
+  const result = match opt {
+    Just { value } -> value;
+    Nothing -> default_val;
+  };
+  return result;
+}
+
+// function that checks if option has value
+function is_just(opt: Option) -> i32 {
+  const result = match opt {
+    Just { value } -> 1;
+    Nothing -> 0;
+  };
+  return result;
+}
+
+function main() -> i32 effects [io] {
+  println("=== simple union matching ===");
+  println("");
+
+  // create some values
+  const just_val = make_just(42);
+  const nothing_val = make_nothing();
+
+  // test unwrap_or
+  println("testing unwrap_or:");
+  const val1 = unwrap_or(just_val, 0);
+  print("  Just(42) unwrap_or 0 = ");
+  print_i32(val1);
+  print_newline();
+
+  const val2 = unwrap_or(nothing_val, 99);
+  print("  Nothing unwrap_or 99 = ");
+  print_i32(val2);
+  print_newline();
+  println("");
+
+  // test is_just
+  println("testing is_just:");
+  const check1 = is_just(just_val);
+  print("  is_just(Just(42)) = ");
+  print_i32(check1);
+  print_newline();
+
+  const check2 = is_just(nothing_val);
+  print("  is_just(Nothing) = ");
+  print_i32(check2);
+  print_newline();
+  println("");
+
+  // inline match expression
+  println("inline match expression:");
+  const code = match just_val {
+    Just { value } -> value + 100;
+    Nothing -> 0;
+  };
+  print("  match Just(42) -> value + 100 = ");
+  print_i32(code);
+  print_newline();
+  println("");
+
+  // match with wildcard
+  println("match with wildcard:");
+  const is_nothing = match just_val {
+    Nothing -> 1;
+    _ -> 0;
+  };
+  print("  Just(42) is Nothing? ");
+  print_i32(is_nothing);
+  print_newline();
+
+  println("");
+  println("=== done ===");
+  return 0;
+}

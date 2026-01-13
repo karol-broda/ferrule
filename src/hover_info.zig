@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("types.zig");
 const ast = @import("ast.zig");
+const context = @import("context.zig");
 
 pub const Position = struct {
     line: usize,
@@ -21,6 +22,7 @@ pub const HoverKind = enum {
     function,
     type_def,
     error_domain,
+    field,
 };
 
 pub const FunctionInfo = struct {
@@ -41,6 +43,12 @@ pub const DomainInfo = struct {
     variants: []DomainVariantInfo,
 };
 
+pub const FieldDefinitionLoc = struct {
+    line: usize,
+    column: usize,
+    length: usize,
+};
+
 pub const HoverInfo = struct {
     line: usize,
     column: usize,
@@ -50,70 +58,51 @@ pub const HoverInfo = struct {
     resolved_type: types.ResolvedType,
     function_info: ?FunctionInfo,
     domain_info: ?DomainInfo,
+    field_def_loc: ?FieldDefinitionLoc,
 };
 
 pub const HoverInfoTable = struct {
     infos: std.ArrayList(HoverInfo),
     allocator: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator) HoverInfoTable {
+    // compilation context for interning
+    // strings and types are borrowed from the context's arena
+    compilation_context: *context.CompilationContext,
+
+    pub fn init(ctx: *context.CompilationContext) HoverInfoTable {
         return .{
             .infos = std.ArrayList(HoverInfo){},
-            .allocator = allocator,
+            .allocator = ctx.permanentAllocator(),
+            .compilation_context = ctx,
         };
     }
 
     pub fn deinit(self: *HoverInfoTable) void {
-        // free all copied strings and cloned types
-        for (self.infos.items) |info| {
-            self.allocator.free(info.name);
-
-            // deinit the resolved type
-            info.resolved_type.deinit(self.allocator);
-
-            if (info.function_info) |func_info| {
-                for (func_info.param_names) |param_name| {
-                    self.allocator.free(param_name);
-                }
-                self.allocator.free(func_info.param_names);
-
-                // deinit cloned param types
-                for (func_info.params) |*param| {
-                    param.deinit(self.allocator);
-                }
-                self.allocator.free(func_info.params);
-
-                self.allocator.free(func_info.effects);
-                if (func_info.error_domain) |domain| {
-                    self.allocator.free(domain);
-                }
-            }
-
-            if (info.domain_info) |domain_info| {
-                for (domain_info.variants) |variant| {
-                    self.allocator.free(variant.name);
-                    for (variant.field_names) |field_name| {
-                        self.allocator.free(field_name);
-                    }
-                    self.allocator.free(variant.field_names);
-                    for (variant.field_types) |*field_type| {
-                        field_type.deinit(self.allocator);
-                    }
-                    self.allocator.free(variant.field_types);
-                }
-                self.allocator.free(domain_info.variants);
-            }
-        }
-
+        // arena cleanup handles type memory; only the arraylist structure needs explicit cleanup
         self.infos.deinit(self.allocator);
     }
 
-    pub fn add(self: *HoverInfoTable, line: usize, column: usize, length: usize, name: []const u8, kind: HoverKind, resolved_type: types.ResolvedType) !void {
-        // copy name to ensure it survives after AST is destroyed
-        const name_copy = try self.allocator.dupe(u8, name);
+    // interns a string in the context's arena
+    fn internString(self: *HoverInfoTable, str: []const u8) ![]const u8 {
+        return self.compilation_context.internString(str);
+    }
 
-        // clone the type to ensure it survives after AST is destroyed
-        const type_copy = try resolved_type.clone(self.allocator);
+    // interns a type in the context's arena
+    fn internType(self: *HoverInfoTable, resolved_type: types.ResolvedType) !types.ResolvedType {
+        const interned = try self.compilation_context.internType(resolved_type);
+        return interned.*;
+    }
+
+    pub fn add(self: *HoverInfoTable, line: usize, column: usize, length: usize, name: []const u8, kind: HoverKind, resolved_type: types.ResolvedType) !void {
+        try self.addWithFieldDef(line, column, length, name, kind, resolved_type, null);
+    }
+
+    pub fn addWithFieldDef(self: *HoverInfoTable, line: usize, column: usize, length: usize, name: []const u8, kind: HoverKind, resolved_type: types.ResolvedType, field_def_loc: ?FieldDefinitionLoc) !void {
+        // intern name to ensure it survives after AST is destroyed
+        const name_copy = try self.internString(name);
+
+        // intern the type to ensure it survives after AST is destroyed
+        const type_copy = try self.internType(resolved_type);
 
         try self.infos.append(self.allocator, .{
             .line = line,
@@ -124,36 +113,37 @@ pub const HoverInfoTable = struct {
             .resolved_type = type_copy,
             .function_info = null,
             .domain_info = null,
+            .field_def_loc = field_def_loc,
         });
     }
 
     pub fn addFunction(self: *HoverInfoTable, line: usize, column: usize, length: usize, name: []const u8, params: []types.ResolvedType, param_names: [][]const u8, return_type: types.ResolvedType, effects: []types.Effect, error_domain: ?[]const u8) !void {
-        // deep copy param_names to ensure they survive after AST is destroyed
+        // intern or copy param_names to ensure they survive after AST is destroyed
         const param_names_copy = try self.allocator.alloc([]const u8, param_names.len);
         for (param_names, 0..) |param_name, i| {
-            param_names_copy[i] = try self.allocator.dupe(u8, param_name);
+            param_names_copy[i] = try self.internString(param_name);
         }
 
-        // deep copy params array to ensure types survive after AST is destroyed
+        // intern or clone params array to ensure types survive after AST is destroyed
         const params_copy = try self.allocator.alloc(types.ResolvedType, params.len);
         for (params, 0..) |param, i| {
-            params_copy[i] = try param.clone(self.allocator);
+            params_copy[i] = try self.internType(param);
         }
 
-        // deep copy return type
-        const return_type_copy = try return_type.clone(self.allocator);
+        // intern or clone return type
+        const return_type_copy = try self.internType(return_type);
 
-        // deep copy effects array
+        // copy effects array (effects are simple enums, always copy)
         const effects_copy = try self.allocator.dupe(types.Effect, effects);
 
-        // deep copy error_domain if present
-        const error_domain_copy = if (error_domain) |domain|
-            try self.allocator.dupe(u8, domain)
+        // intern or copy error_domain if present
+        const error_domain_copy: ?[]const u8 = if (error_domain) |domain|
+            try self.internString(domain)
         else
             null;
 
-        // copy name
-        const name_copy = try self.allocator.dupe(u8, name);
+        // intern or copy name
+        const name_copy = try self.internString(name);
 
         try self.infos.append(self.allocator, .{
             .line = line,
@@ -170,27 +160,28 @@ pub const HoverInfoTable = struct {
                 .error_domain = error_domain_copy,
             },
             .domain_info = null,
+            .field_def_loc = null,
         });
     }
 
     pub fn addDomain(self: *HoverInfoTable, line: usize, column: usize, length: usize, name: []const u8, variants: []DomainVariantInfo) !void {
-        // copy name to ensure it survives after AST is destroyed
-        const name_copy = try self.allocator.dupe(u8, name);
+        // intern or copy name to ensure it survives after AST is destroyed
+        const name_copy = try self.internString(name);
 
-        // deep copy variant info
+        // deep copy variant info with interning where possible
         const variants_copy = try self.allocator.alloc(DomainVariantInfo, variants.len);
         for (variants, 0..) |variant, i| {
-            const variant_name_copy = try self.allocator.dupe(u8, variant.name);
+            const variant_name_copy = try self.internString(variant.name);
 
             const field_names_copy = try self.allocator.alloc([]const u8, variant.field_names.len);
             for (variant.field_names, 0..) |field_name, j| {
-                field_names_copy[j] = try self.allocator.dupe(u8, field_name);
+                field_names_copy[j] = try self.internString(field_name);
             }
 
-            // clone field types to ensure they survive after AST is destroyed
+            // intern or clone field types to ensure they survive after AST is destroyed
             const field_types_copy = try self.allocator.alloc(types.ResolvedType, variant.field_types.len);
             for (variant.field_types, 0..) |field_type, j| {
-                field_types_copy[j] = try field_type.clone(self.allocator);
+                field_types_copy[j] = try self.internType(field_type);
             }
 
             variants_copy[i] = .{
@@ -211,6 +202,7 @@ pub const HoverInfoTable = struct {
             .domain_info = .{
                 .variants = variants_copy,
             },
+            .field_def_loc = null,
         });
     }
 

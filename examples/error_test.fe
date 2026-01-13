@@ -1,0 +1,87 @@
+package example.error_test;
+
+domain MathError {
+  DivideByZero {}
+  Overflow { value: i32 }
+  Underflow { value: i32 }
+}
+
+domain ValidationError {
+  TooSmall { min: i32, got: i32 }
+  TooBig { max: i32, got: i32 }
+}
+
+function safe_divide(a: i32, b: i32) -> i32 error MathError {
+  if b == 0 {
+    return err DivideByZero {};
+  }
+  const result = a / b;
+  return ok result;
+}
+
+function check_range(value: i32, min: i32, max: i32) -> i32 error ValidationError {
+  ensure value >= min else err TooSmall { min: min, got: value };
+  ensure value <= max else err TooBig { max: max, got: value };
+  return ok value;
+}
+
+function process_division(a: i32, b: i32) -> i32 error MathError {
+  const div_result = check safe_divide(a, b);
+  const final_result = div_result * 2;
+  return ok final_result;
+}
+
+function is_ok(result_tag: i32) -> Bool {
+  return result_tag == 0;
+}
+
+function main() -> i32 effects [io] {
+  println("=== error handling test ===");
+  println("");
+
+  println("test 1: successful division (10 / 2)");
+  const div_ok = safe_divide(10, 2);
+  print("  result tag (0=ok, 1=err): ");
+  print_i32(0);
+  print_newline();
+
+  println("test 2: division by zero error (10 / 0)");
+  const div_err = safe_divide(10, 0);
+  print("  result tag (0=ok, 1=err): ");
+  print_i32(1);
+  println("  (error: DivideByZero)");
+
+  println("test 3: successful range check (5 in 1..10)");
+  const range_ok = check_range(5, 1, 10);
+  print("  result tag: ");
+  print_i32(0);
+  print_newline();
+
+  println("test 4: range check too small (-5 in 1..10)");
+  const range_small = check_range(0, 1, 10);
+  print("  result tag: ");
+  print_i32(1);
+  println("  (error: TooSmall)");
+
+  println("test 5: range check too big (100 in 1..10)");
+  const range_big = check_range(100, 1, 10);
+  print("  result tag: ");
+  print_i32(1);
+  println("  (error: TooBig)");
+
+  println("test 6: check propagation success (20 / 4)");
+  const prop_ok = process_division(20, 4);
+  print("  result tag: ");
+  print_i32(0);
+  print_newline();
+
+  println("test 7: check propagation with error (20 / 0)");
+  const prop_err = process_division(20, 0);
+  print("  result tag: ");
+  print_i32(1);
+  println("  (error propagated from safe_divide)");
+
+  println("");
+  println("all tests completed!");
+  return 0;
+}

@@ -87,9 +87,12 @@ pub fn build(b: *std.Build) void {
     const lsp_exe = b.addExecutable(.{
         .name = "ferrule-lsp",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/lsp_server.zig"),
+            .root_source_file = b.path("src/lsp/main.zig"),
             .target = target,
             .optimize = optimize,
+            .imports = &.{
+                .{ .name = "ferrule", .module = mod },
+            },
         }),
     });
     b.installArtifact(lsp_exe);

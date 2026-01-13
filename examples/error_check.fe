@@ -1,0 +1,27 @@
+package example.error_check;
+
+domain ParseError {
+  EmptyInput {}
+  InvalidFormat { message: String }
+}
+
+function parse_number(input: String) -> i32 error ParseError {
+  const len: i32 = 3;
+
+  if len == 0 {
+    return err EmptyInput {};
+  }
+
+  return ok 42;
+}
+
+function process_input(input: String) -> i32 error ParseError {
+  const validated = check parse_number(input);
+  return ok validated;
+}
+
+function main() -> i32 effects [io] {
+  println("error check test:");
+  println("done");
+  return 0;
+}

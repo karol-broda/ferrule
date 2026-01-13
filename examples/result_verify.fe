@@ -1,0 +1,74 @@
+package example.result_verify;
+
+domain MathError {
+  DivideByZero {}
+  NegativeInput { value: i32 }
+}
+
+function divide(a: i32, b: i32) -> i32 error MathError {
+  if b == 0 {
+    return err DivideByZero {};
+  }
+  return ok a / b;
+}
+
+function sqrt_positive(n: i32) -> i32 error MathError {
+  if n < 0 {
+    return err NegativeInput { value: n };
+  }
+  return ok n;
+}
+
+function chained_math(a: i32, b: i32) -> i32 error MathError {
+  const div_result = check divide(a, b);
+  const sqrt_result = check sqrt_positive(div_result);
+  return ok sqrt_result * 2;
+}
+
+function test_ensure(value: i32) -> i32 error MathError {
+  ensure value > 0 else err NegativeInput { value: value };
+  return ok value * 10;
+}
+
+function main() -> i32 effects [io] {
+  println("=== result type verification test ===");
+  println("");
+
+  println("test 1: divide(10, 2) should succeed");
+  const r1 = divide(10, 2);
+  println("  called divide(10, 2)");
+
+  println("test 2: divide(10, 0) should fail with DivideByZero");
+  const r2 = divide(10, 0);
+  println("  called divide(10, 0)");
+
+  println("test 3: sqrt_positive(16) should succeed");
+  const r3 = sqrt_positive(16);
+  println("  called sqrt_positive(16)");
+
+  println("test 4: sqrt_positive(-5) should fail with NegativeInput");
+  const r4 = sqrt_positive(0 - 5);
+  println("  called sqrt_positive(-5)");
+
+  println("test 5: chained_math(20, 4) should succeed");
+  const r5 = chained_math(20, 4);
+  println("  called chained_math(20, 4) - check propagates ok");
+
+  println("test 6: chained_math(20, 0) should propagate DivideByZero");
+  const r6 = chained_math(20, 0);
+  println("  called chained_math(20, 0) - check propagates error");
+
+  println("test 7: test_ensure(5) should succeed");
+  const r7 = test_ensure(5);
+  println("  called test_ensure(5)");
+
+  println("test 8: test_ensure(-3) should fail via ensure");
+  const r8 = test_ensure(0 - 3);
+  println("  called test_ensure(-3)");
+
+  println("");
+  println("all result type tests completed!");
+  println("note: actual result extraction (isOk/isErr/unwrap) requires field access codegen");
+
+  return 0;
+}

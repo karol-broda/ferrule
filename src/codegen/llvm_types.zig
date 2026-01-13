@@ -168,7 +168,7 @@ pub const TypeMapper = struct {
         return llvm.structTypeInContext(self.context, &fields, 3, 0);
     }
 
-    fn createNullableType(self: *TypeMapper, inner_type: *llvm.TypeRef) *llvm.TypeRef {
+    pub fn createNullableType(self: *TypeMapper, inner_type: *llvm.TypeRef) *llvm.TypeRef {
         const fields = [_]*llvm.TypeRef{
             llvm.int1Type(self.context), // has_value
             inner_type, // value

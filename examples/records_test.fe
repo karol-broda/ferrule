@@ -1,0 +1,100 @@
+package example.records_test;
+
+domain ValidationError {
+  InvalidAge { age: i32 }
+  InvalidName {}
+}
+
+function validate_age(age: i32) -> i32 error ValidationError {
+  if age < 0 {
+    return err InvalidAge { age: age };
+  }
+  if age > 150 {
+    return err InvalidAge { age: age };
+  }
+  return ok age;
+}
+
+function main() -> i32 effects [io] {
+  println("=== records and field access test ===");
+  println("");
+
+  println("test 1: create record literal");
+  const person1 = { name_len: 5, age: 30 };
+  println("  created person record");
+
+  println("test 2: access record fields");
+  const age1 = person1.age;
+  const name_len1 = person1.name_len;
+  print("  age: ");
+  print_i32(age1);
+  print_newline();
+  print("  name_len: ");
+  print_i32(name_len1);
+  print_newline();
+
+  println("test 3: nested record creation");
+  const person2 = { name_len: 7, age: 25 };
+  const age2 = person2.age;
+  print("  second person age: ");
+  print_i32(age2);
+  print_newline();
+
+  println("test 4: result type field access (valid age)");
+  const valid_result = validate_age(25);
+  const valid_tag = valid_result.tag;
+  print("  result tag (0=ok): ");
+  if valid_tag == 0 {
+    print_i32(0);
+  } else {
+    print_i32(1);
+  }
+  print_newline();
+  if valid_tag == 0 {
+    const valid_value = valid_result.value;
+    print("  result value: ");
+    print_i32(valid_value);
+    print_newline();
+  }
+
+  println("test 5: result type field access (invalid age)");
+  const invalid_result = validate_age(0 - 5);
+  const invalid_tag = invalid_result.tag;
+  print("  result tag (1=err): ");
+  if invalid_tag == 1 {
+    print_i32(1);
+  } else {
+    print_i32(0);
+  }
+  print_newline();
+  if invalid_tag == 1 {
+    const err_code = invalid_result.error_code;
+    print("  error code: ");
+    print_i64(err_code);
+    print_newline();
+  }
+
+  println("test 6: string field access");
+  const greeting = "hello";
+  const str_len = greeting.len;
+  print("  string length: ");
+  print_i64(str_len);
+  print_newline();
+
+  println("test 7: multiple record operations");
+  const p1 = { x: 10, y: 20 };
+  const p2 = { x: 30, y: 40 };
+  const sum_x = p1.x + p2.x;
+  const sum_y = p1.y + p2.y;
+  print("  sum of x: ");
+  print_i32(sum_x);
+  print_newline();
+  print("  sum of y: ");
+  print_i32(sum_y);
+  print_newline();
+
+  println("");
+  println("all records and field access tests completed");
+
+  return 0;
+}

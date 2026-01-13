@@ -1,5 +1,11 @@
 const std = @import("std");
 
+pub const FieldLocation = struct {
+    line: usize,
+    column: usize,
+    length: usize,
+};
+
 pub const Variance = enum {
     invariant,
     covariant,
@@ -109,6 +115,7 @@ pub const ResolvedType = union(enum) {
     record: struct {
         field_names: []const []const u8,
         field_types: []ResolvedType,
+        field_locations: ?[]const FieldLocation,
     },
 
     // discriminated union: | Variant1 | Variant2 { field: Type }
@@ -201,10 +208,10 @@ pub const ResolvedType = union(enum) {
             .result => |r| {
                 const ok_ptr = try allocator.create(ResolvedType);
                 ok_ptr.* = try r.ok_type.clone(allocator);
-                const domain_copy = try allocator.dupe(u8, r.error_domain);
+                // error_domain is always a reference to AST memory, don't clone it
                 return ResolvedType{ .result = .{
                     .ok_type = ok_ptr,
-                    .error_domain = domain_copy,
+                    .error_domain = r.error_domain,
                 } };
             },
             .range => |r| {
@@ -247,9 +254,14 @@ pub const ResolvedType = union(enum) {
                 for (r.field_types, 0..) |ft, i| {
                     types_copy[i] = try ft.clone(allocator);
                 }
+                const locs_copy: ?[]const FieldLocation = if (r.field_locations) |locs|
+                    try allocator.dupe(FieldLocation, locs)
+                else
+                    null;
                 return ResolvedType{ .record = .{
                     .field_names = names_copy,
                     .field_types = types_copy,
+                    .field_locations = locs_copy,
                 } };
             },
             .union_type => |u| {
@@ -276,105 +288,10 @@ pub const ResolvedType = union(enum) {
         };
     }
 
+    // no-op: memory is arena-managed
     pub fn deinit(self: *const ResolvedType, allocator: std.mem.Allocator) void {
-        switch (self.*) {
-            .i8, .i16, .i32, .i64, .i128, .u8, .u16, .u32, .u64, .u128, .usize_type, .f16, .f32, .f64, .bool_type, .char_type, .string_type, .bytes_type, .unit_type, .fs_cap, .net_cap, .io_cap, .time_cap, .rng_cap, .alloc_cap, .cpu_cap, .atomics_cap, .simd_cap, .ffi_cap, .type_param => {},
-            .array => |a| {
-                a.element_type.deinit(allocator);
-                allocator.destroy(a.element_type);
-            },
-            .vector => |v| {
-                v.element_type.deinit(allocator);
-                allocator.destroy(v.element_type);
-            },
-            .view => |v| {
-                v.element_type.deinit(allocator);
-                allocator.destroy(v.element_type);
-            },
-            .nullable => |n| {
-                n.deinit(allocator);
-                allocator.destroy(n);
-            },
-            .function_type => |f| {
-                for (f.params) |*param| {
-                    param.deinit(allocator);
-                }
-                allocator.free(f.params);
-                f.return_type.deinit(allocator);
-                allocator.destroy(f.return_type);
-                allocator.free(f.effects);
-                if (f.error_domain) |domain| {
-                    allocator.free(domain);
-                }
-                if (f.type_params) |tps| {
-                    for (tps) |tp| {
-                        allocator.free(tp.name);
-                        if (tp.constraint) |c| {
-                            c.deinit(allocator);
-                            allocator.destroy(c);
-                        }
-                        if (tp.const_type) |ct| {
-                            ct.deinit(allocator);
-                            allocator.destroy(ct);
-                        }
-                    }
-                    allocator.free(tps);
-                }
-            },
-            .named => |n| {
-                n.underlying.deinit(allocator);
-                allocator.destroy(n.underlying);
-                allocator.free(n.name);
-            },
-            .result => |r| {
-                r.ok_type.deinit(allocator);
-                allocator.destroy(r.ok_type);
-                allocator.free(r.error_domain);
-            },
-            .range => |r| {
-                r.element_type.deinit(allocator);
-                allocator.destroy(r.element_type);
-            },
-            .generic_instance => |g| {
-                for (g.type_args) |*arg| {
-                    arg.deinit(allocator);
-                }
-                allocator.free(g.type_args);
-                if (g.underlying) |u| {
-                    u.deinit(allocator);
-                    allocator.destroy(u);
-                }
-                allocator.free(g.base_name);
-            },
-            .const_value => |cv| {
-                cv.const_type.deinit(allocator);
-                allocator.destroy(cv.const_type);
-            },
-            .record => |r| {
-                for (r.field_names) |name| {
-                    allocator.free(name);
-                }
-                allocator.free(r.field_names);
-                for (r.field_types) |*ft| {
-                    ft.deinit(allocator);
-                }
-                allocator.free(r.field_types);
-            },
-            .union_type => |u| {
-                for (u.variants) |v| {
-                    allocator.free(v.name);
-                    for (v.field_names) |name| {
-                        allocator.free(name);
-                    }
-                    allocator.free(v.field_names);
-                    for (v.field_types) |*ft| {
-                        ft.deinit(allocator);
-                    }
-                    allocator.free(v.field_types);
-                }
-                allocator.free(u.variants);
-            },
-        }
+        _ = self;
+        _ = allocator;
     }
 
     pub fn eql(self: *const ResolvedType, other: *const ResolvedType) bool {
@@ -612,7 +529,8 @@ pub const ResolvedType = union(enum) {
                 for (type_params, 0..) |param_name, i| {
                     if (std.mem.eql(u8, tp.name, param_name)) {
                         if (i < type_args.len) {
-                            return try type_args[i].clone(allocator);
+                            // types are arena-managed, return directly
+                            return type_args[i];
                         }
                     }
                 }
@@ -707,9 +625,14 @@ pub const ResolvedType = union(enum) {
                 for (r.field_types, 0..) |ft, i| {
                     types_copy[i] = try ft.substitute(type_params, type_args, allocator);
                 }
+                const locs_copy: ?[]const FieldLocation = if (r.field_locations) |locs|
+                    try allocator.dupe(FieldLocation, locs)
+                else
+                    null;
                 return ResolvedType{ .record = .{
                     .field_names = names_copy,
                     .field_types = types_copy,
+                    .field_locations = locs_copy,
                 } };
             },
             .union_type => |u| {
@@ -774,6 +697,75 @@ pub const ResolvedType = union(enum) {
                 }
                 return false;
             },
+        };
+    }
+
+    /// dumps the type structure for debugging
+    /// uses the provided allocator for temporary string formatting
+    pub fn dump(self: ResolvedType, allocator: std.mem.Allocator) void {
+        const type_str = self.toStr(allocator) catch |err| {
+            std.debug.print("[ResolvedType dump error: {s}]\n", .{@errorName(err)});
+            return;
+        };
+        defer allocator.free(type_str);
+        std.debug.print("[Type] {s}\n", .{type_str});
+    }
+
+    /// dumps the type with a label prefix for debugging
+    pub fn dumpWithLabel(self: ResolvedType, label: []const u8, allocator: std.mem.Allocator) void {
+        const type_str = self.toStr(allocator) catch |err| {
+            std.debug.print("[{s}] error: {s}\n", .{ label, @errorName(err) });
+            return;
+        };
+        defer allocator.free(type_str);
+        std.debug.print("[{s}] {s}\n", .{ label, type_str });
+    }
+
+    /// returns a compact tag name for the type (no allocations)
+    pub fn tagName(self: ResolvedType) []const u8 {
+        return switch (self) {
+            .i8 => "i8",
+            .i16 => "i16",
+            .i32 => "i32",
+            .i64 => "i64",
+            .i128 => "i128",
+            .u8 => "u8",
+            .u16 => "u16",
+            .u32 => "u32",
+            .u64 => "u64",
+            .u128 => "u128",
+            .usize_type => "usize",
+            .f16 => "f16",
+            .f32 => "f32",
+            .f64 => "f64",
+            .bool_type => "bool",
+            .char_type => "char",
+            .string_type => "String",
+            .bytes_type => "Bytes",
+            .unit_type => "Unit",
+            .fs_cap => "Fs",
+            .net_cap => "Net",
+            .io_cap => "Io",
+            .time_cap => "Time",
+            .rng_cap => "Rng",
+            .alloc_cap => "Alloc",
+            .cpu_cap => "Cpu",
+            .atomics_cap => "Atomics",
+            .simd_cap => "Simd",
+            .ffi_cap => "Ffi",
+            .array => "Array",
+            .vector => "Vector",
+            .view => "View",
+            .nullable => "Nullable",
+            .function_type => "Function",
+            .named => "Named",
+            .result => "Result",
+            .range => "Range",
+            .type_param => "TypeParam",
+            .generic_instance => "GenericInstance",
+            .const_value => "ConstValue",
+            .record => "Record",
+            .union_type => "Union",
         };
     }
 };

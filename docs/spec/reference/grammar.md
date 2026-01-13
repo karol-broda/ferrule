@@ -183,11 +183,15 @@ Block        := "{" { Statement }* "}"
 
 Statement    := ConstDecl
              | VarDecl
+             | ConstMatch
              | Assignment
              | If
+             | IfMatch
              | While
+             | WhileMatch
              | For
              | Match
+             | MatchCheck
              | Return
              | Defer
              | ContextBlock
@@ -195,12 +199,16 @@ Statement    := ConstDecl
 
 LocalConstDecl := "const" Identifier { ":" TypeExpr }? "=" Expr ";"
 VarDecl      := "var" Identifier ":" TypeExpr "=" Expr ";"
+ConstMatch   := "const" Pattern "=" Expr "else" Block ";"
 Assignment   := LValue "=" Expr ";"
 
-If           := "if" Expr Block { "else" Block }?
+If           := "if" Expr Block { "else" Block | IfMatch }?
+IfMatch      := "if" "match" Expr "{" Case "}" { "else" Block }?
 While        := "while" Expr Block
+WhileMatch   := "while" "match" Expr "{" Case "}"
 For          := "for" Identifier "in" Expr Block
 Match        := "match" Expr "{" { Case }+ "}"
+MatchCheck   := "match" "check" Expr "{" { Case }+ "}"
 Return       := "return" Expr ";"
 Defer        := "defer" Expr ";"
 
@@ -208,7 +216,7 @@ ContextBlock := "with" "context" "{" ContextList "}" "in" Block
 ContextList  := ContextItem { "," ContextItem }*
 ContextItem  := Identifier ":" Expr
 
-Case         := Pattern { "if" Expr }? "->" Expr ";"
+Case         := Pattern { "where" Expr }? "->" Expr ";"
 ```
 
 ---
@@ -216,10 +224,35 @@ Case         := Pattern { "if" Expr }? "->" Expr ";"
 ## Patterns
 
 ```ebnf
-Pattern      := "_"                         /* wildcard */
-             | Identifier                   /* binding */
-             | Literal                      /* literal match */
-             | Identifier "{" PatternFields "}" /* variant destructure */
+Pattern      := OrPattern
+
+OrPattern    := NamedPattern { "|" NamedPattern }*
+
+NamedPattern := Identifier "as" PrimaryPattern   /* named binding */
+             | PrimaryPattern
+
+PrimaryPattern := "_"                            /* wildcard */
+             | Literal                           /* literal match */
+             | RangePattern                      /* range match */
+             | Identifier                        /* binding or unit variant */
+             | Identifier "{" PatternFields "}"  /* variant/record destructure */
+             | "{" PatternFields { "," ".." }? "}" /* record pattern */
+             | ArrayPattern                      /* array pattern */
+             | "(" Pattern ")"                   /* grouped */
+
+RangePattern := RangeBound ".." RangeBound       /* exclusive range */
+             | RangeBound "..=" RangeBound       /* inclusive range */
+
+RangeBound   := IntLit | CharLit
+
+ArrayPattern := "[" "]"                          /* empty */
+             | "[" PatternList "]"               /* fixed elements */
+             | "[" PatternList "," ".." "]"      /* prefix + rest */
+             | "[" ".." "]"                      /* any length */
+             | "[" ".." "," PatternList "]"      /* rest + suffix */
+             | "[" PatternList "," ".." "," PatternList "]" /* prefix + rest + suffix */
+
+PatternList  := Pattern { "," Pattern }*
 
 PatternFields := PatternField { "," PatternField }*
 PatternField  := Identifier { ":" Pattern }?

@@ -49,12 +49,75 @@ done
 - scalars: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f32`, `f64`, `Bool`
 - `String`, `Array`
 - ranges: `0..10`
+- `Result<T, E>` (implicit for functions with error domains)
 
 ### operators
 
 - arithmetic: `+`, `-`, `*`, `/`, `%`
 - comparison: `==`, `!=`, `<`, `>`, `<=`, `>=`
 - logical: `&&`, `||`
+
+### error handling
+
+#### error domains
+
+```ferrule
+domain ParseError {
+  EmptyInput {}
+  InvalidFormat { message: String }
+}
+```
+
+#### error construction
+
+```ferrule
+// ok wraps a value in Result<T, E>
+return ok value;
+
+// err constructs an error variant
+return err EmptyInput {};
+return err InvalidFormat { message: "bad input" };
+```
+
+#### error propagation
+
+```ferrule
+// check unwraps Result or returns error immediately
+const result = check some_fallible_call();
+
+// check with context frames for debugging
+const result = check some_call() with { op: "parse", path: p };
+
+// ensure guards with early error return
+ensure len >= min else err TooShort { min_length: min };
+
+// map_error adapts error domains
+const data = map_error read_file(p) using (e => ClientError.File { cause: e });
+```
+
+#### function signatures with errors
+
+```ferrule
+function parse_number(input: String) -> i32 error ParseError {
+  if input_empty {
+    return err EmptyInput {};
+  }
+  return ok 42;
+}
+
+function process(input: String) -> i32 error ParseError {
+  const n = check parse_number(input);
+  return ok n * 2;
+}
+```
+
+### runtime
+
+the runtime library provides:
+- i/o functions (print, read)
+- string operations
+- memory allocation
+- error context frames for debugging
 
 ## build
 
@@ -98,6 +161,34 @@ function main() -> i32 effects [io] {
   }
   print_i32(sum); // 15
   return 0;
+}
+```
+
+```ferrule
+// error handling with check
+domain ParseError {
+  EmptyInput {}
+}
+
+function parse(input: String) -> i32 error ParseError {
+  const len: i32 = 3;
+  if len == 0 {
+    return err EmptyInput {};
+  }
+  return ok 42;
+}
+
+function process(input: String) -> i32 error ParseError {
+  const n = check parse(input);
+  return ok n;
+}
+```
+
+```ferrule
+// ensure guards
+function validate(x: i32, min: i32) -> i32 error ValidationError {
+  ensure x >= min else err TooSmall { min_value: min };
+  return ok x;
 }
 ```
 

@@ -1,6 +1,7 @@
 const std = @import("std");
 const lexer = @import("lexer.zig");
 const ast = @import("ast.zig");
+const diagnostics = @import("diagnostics.zig");
 
 const Token = lexer.Token;
 const TokenType = lexer.TokenType;
@@ -16,33 +17,40 @@ pub const Parser = struct {
     tokens: []const Token,
     current: usize,
     allocator: std.mem.Allocator,
+    // separate allocator for diagnostic messages to avoid arena/allocator mismatch
+    diag_allocator: std.mem.Allocator,
+    diagnostics_list: ?*diagnostics.DiagnosticList,
+    source_file: []const u8,
 
     pub fn init(allocator: std.mem.Allocator, tokens: []const Token) Parser {
         return .{
             .tokens = tokens,
             .current = 0,
             .allocator = allocator,
+            .diag_allocator = allocator,
+            .diagnostics_list = null,
+            .source_file = "",
         };
     }
 
+    pub fn initWithDiagnostics(allocator: std.mem.Allocator, tokens: []const Token, diag_list: *diagnostics.DiagnosticList, source_file: []const u8) Parser {
+        return .{
+            .tokens = tokens,
+            .current = 0,
+            .allocator = allocator,
+            // use the diagnostics list's allocator for error messages
+            .diag_allocator = diag_list.allocator,
+            .diagnostics_list = diag_list,
+            .source_file = source_file,
+        };
+    }
+
+    // parses the token stream into an AST module
+    // memory is managed by the arena allocator - no manual cleanup needed
     pub fn parse(self: *Parser) ParseError!ast.Module {
         var package_decl: ?ast.PackageDecl = null;
         var imports: std.ArrayList(ast.ImportDecl) = .empty;
         var statements: std.ArrayList(ast.Stmt) = .empty;
-
-        errdefer {
-            if (package_decl) |pd| {
-                self.allocator.free(pd.name);
-            }
-            for (imports.items) |import_decl| {
-                import_decl.deinit(self.allocator);
-            }
-            imports.deinit(self.allocator);
-            for (statements.items) |*stmt| {
-                ast.deinitStmt(stmt, self.allocator);
-            }
-            statements.deinit(self.allocator);
-        }
 
         // parse package declaration
         if (self.check(.package_kw)) {
@@ -52,19 +60,13 @@ pub const Parser = struct {
         // parse imports
         while (self.check(.import_kw)) {
             const import_decl = try self.importDeclaration();
-            imports.append(self.allocator, import_decl) catch |err| {
-                import_decl.deinit(self.allocator);
-                return err;
-            };
+            try imports.append(self.allocator, import_decl);
         }
 
         // parse top-level declarations
         while (!self.isAtEnd()) {
             const decl = try self.declaration();
-            statements.append(self.allocator, decl) catch |err| {
-                ast.deinitStmt(&decl, self.allocator);
-                return err;
-            };
+            try statements.append(self.allocator, decl);
         }
 
         return ast.Module{
@@ -106,7 +108,6 @@ pub const Parser = struct {
         _ = try self.consume(.lbrace, "expected '{' after import source");
 
         var items: std.ArrayList(ast.ImportItem) = .empty;
-        errdefer items.deinit(self.allocator);
 
         if (!self.check(.rbrace)) {
             while (true) {
@@ -169,12 +170,6 @@ pub const Parser = struct {
         const name = try self.consume(.identifier, "expected error name");
 
         var fields: std.ArrayList(ast.Field) = .empty;
-        errdefer {
-            for (fields.items) |field| {
-                ast.deinitType(&field.type_annotation, self.allocator);
-            }
-            fields.deinit(self.allocator);
-        }
 
         if (self.match(.lbrace)) {
             if (!self.check(.rbrace)) {
@@ -215,7 +210,6 @@ pub const Parser = struct {
         var type_params: ?[]ast.TypeParam = null;
         if (self.match(.lt)) {
             var tparams: std.ArrayList(ast.TypeParam) = .empty;
-            errdefer tparams.deinit(self.allocator);
 
             while (true) {
                 var variance: ast.Variance = .invariant;
@@ -260,12 +254,6 @@ pub const Parser = struct {
         _ = try self.consume(.lparen, "expected '(' after function name");
 
         var params: std.ArrayList(ast.Param) = .empty;
-        errdefer {
-            for (params.items) |*param| {
-                ast.deinitType(&param.type_annotation, self.allocator);
-            }
-            params.deinit(self.allocator);
-        }
 
         if (!self.check(.rparen)) {
             while (true) {
@@ -306,7 +294,6 @@ pub const Parser = struct {
         _ = try self.consume(.arrow, "expected '->' after parameters");
 
         const return_type = try self.parseType();
-        errdefer ast.deinitType(&return_type, self.allocator);
 
         var error_domain: ?[]const u8 = null;
         if (self.match(.error_kw)) {
@@ -315,7 +302,6 @@ pub const Parser = struct {
         }
 
         var effects: std.ArrayList([]const u8) = .empty;
-        errdefer effects.deinit(self.allocator);
 
         if (self.match(.effects_kw)) {
             _ = try self.consume(.lbracket, "expected '[' after 'effects'");
@@ -357,7 +343,6 @@ pub const Parser = struct {
         var type_params: ?[]ast.TypeParam = null;
         if (self.match(.lt)) {
             var params: std.ArrayList(ast.TypeParam) = .empty;
-            errdefer params.deinit(self.allocator);
 
             while (true) {
                 var variance: ast.Variance = .invariant;
@@ -419,7 +404,6 @@ pub const Parser = struct {
         // Check for union syntax: domain IoError = NotFound | Denied;
         if (self.match(.eq)) {
             var error_names: std.ArrayList([]const u8) = .empty;
-            errdefer error_names.deinit(self.allocator);
 
             // First error name
             const first_name = try self.consume(.identifier, "expected error type name");
@@ -447,26 +431,11 @@ pub const Parser = struct {
         _ = try self.consume(.lbrace, "expected '{' or '=' after domain name");
 
         var variants: std.ArrayList(ast.DomainVariant) = .empty;
-        errdefer {
-            for (variants.items) |variant| {
-                for (variant.fields) |field| {
-                    ast.deinitType(&field.type_annotation, self.allocator);
-                }
-                self.allocator.free(variant.fields);
-            }
-            variants.deinit(self.allocator);
-        }
 
         while (!self.check(.rbrace) and !self.isAtEnd()) {
             const variant_name = try self.consume(.identifier, "expected variant name");
 
             var fields: std.ArrayList(ast.Field) = .empty;
-            errdefer {
-                for (fields.items) |field| {
-                    ast.deinitType(&field.type_annotation, self.allocator);
-                }
-                fields.deinit(self.allocator);
-            }
 
             if (self.match(.lbrace)) {
                 if (!self.check(.rbrace)) {
@@ -545,11 +514,6 @@ pub const Parser = struct {
         if (self.match(.colon)) {
             type_annotation = try self.parseType();
         }
-        errdefer {
-            if (type_annotation) |ta| {
-                ast.deinitType(&ta, self.allocator);
-            }
-        }
 
         _ = try self.consume(.eq, "expected '=' after constant name");
         const value = try self.expression();
@@ -571,11 +535,6 @@ pub const Parser = struct {
         var type_annotation: ?ast.Type = null;
         if (self.match(.colon)) {
             type_annotation = try self.parseType();
-        }
-        errdefer {
-            if (type_annotation) |ta| {
-                ast.deinitType(&ta, self.allocator);
-            }
         }
 
         _ = try self.consume(.eq, "expected '=' after variable name");
@@ -617,16 +576,9 @@ pub const Parser = struct {
 
     fn ifStatement(self: *Parser) ParseError!ast.Stmt {
         const condition = try self.expression();
-        errdefer ast.deinitExpr(condition, self.allocator);
 
         _ = try self.consume(.lbrace, "expected '{' after if condition");
         const then_block = try self.block();
-        errdefer {
-            for (then_block) |*stmt| {
-                ast.deinitStmt(stmt, self.allocator);
-            }
-            self.allocator.free(then_block);
-        }
 
         var else_block: ?[]ast.Stmt = null;
         if (self.match(.else_kw)) {
@@ -652,7 +604,6 @@ pub const Parser = struct {
 
     fn whileStatement(self: *Parser) ParseError!ast.Stmt {
         const condition = try self.expression();
-        errdefer ast.deinitExpr(condition, self.allocator);
 
         _ = try self.consume(.lbrace, "expected '{' after while condition");
         const body = try self.block();
@@ -669,7 +620,6 @@ pub const Parser = struct {
         const iterator = try self.consume(.identifier, "expected iterator name");
         _ = try self.consume(.in_kw, "expected 'in' after iterator");
         const iterable = try self.expression();
-        errdefer ast.deinitExpr(iterable, self.allocator);
 
         _ = try self.consume(.lbrace, "expected '{' after for expression");
         const body = try self.block();
@@ -686,29 +636,21 @@ pub const Parser = struct {
 
     fn matchStatement(self: *Parser) ParseError!ast.Stmt {
         const value = try self.expression();
-        errdefer ast.deinitExpr(value, self.allocator);
 
         _ = try self.consume(.lbrace, "expected '{' after match value");
 
         var arms: std.ArrayList(ast.MatchArm) = .empty;
-        errdefer {
-            for (arms.items) |*arm| {
-                ast.deinitExpr(arm.body, self.allocator);
-            }
-            arms.deinit(self.allocator);
-        }
 
         while (!self.check(.rbrace) and !self.isAtEnd()) {
             const pattern = try self.parsePattern();
+
             _ = try self.consume(.arrow, "expected '->' after pattern");
             const body = try self.expression();
-            arms.append(self.allocator, ast.MatchArm{
+
+            try arms.append(self.allocator, ast.MatchArm{
                 .pattern = pattern,
                 .body = body,
-            }) catch |err| {
-                ast.deinitExpr(body, self.allocator);
-                return err;
-            };
+            });
             _ = try self.consume(.semicolon, "expected ';' after match arm");
         }
 
@@ -724,7 +666,6 @@ pub const Parser = struct {
 
     fn expressionStatement(self: *Parser) ParseError!ast.Stmt {
         const expr = try self.expression();
-        errdefer ast.deinitExpr(expr, self.allocator);
 
         // check for assignment
         if (self.match(.eq)) {
@@ -732,6 +673,19 @@ pub const Parser = struct {
             const target = switch (expr.*) {
                 .identifier => |id| id,
                 else => {
+                    // report error for invalid assignment target
+                    if (self.diagnostics_list) |diag_list| {
+                        diag_list.addError(
+                            "invalid assignment target, expected identifier",
+                            .{
+                                .file = self.source_file,
+                                .line = self.previous().line,
+                                .column = self.previous().column,
+                                .length = 1,
+                            },
+                            null,
+                        ) catch {};
+                    }
                     ast.deinitExpr(expr, self.allocator);
                     self.allocator.destroy(expr);
                     return ParseError.InvalidSyntax;
@@ -763,12 +717,6 @@ pub const Parser = struct {
 
     fn block(self: *Parser) ParseError![]ast.Stmt {
         var statements: std.ArrayList(ast.Stmt) = .empty;
-        errdefer {
-            for (statements.items) |*stmt| {
-                ast.deinitStmt(stmt, self.allocator);
-            }
-            statements.deinit(self.allocator);
-        }
 
         while (!self.check(.rbrace) and !self.isAtEnd()) {
             const decl = try self.declaration();
@@ -1164,7 +1112,8 @@ pub const Parser = struct {
         }
 
         if (self.match(.ok_kw)) {
-            const value = try self.unary();
+            // parse at comparison level to capture arithmetic and comparisons but not logical ops
+            const value = try self.comparison();
             const ok_expr = try self.allocator.create(ast.Expr);
             ok_expr.* = ast.Expr{ .ok = value };
             return ok_expr;
@@ -1175,12 +1124,6 @@ pub const Parser = struct {
             _ = try self.consume(.lbrace, "expected '{' after error variant name");
 
             var fields: std.ArrayList(ast.FieldAssignment) = .empty;
-            errdefer {
-                for (fields.items) |field| {
-                    ast.deinitExpr(field.value, self.allocator);
-                }
-                fields.deinit(self.allocator);
-            }
 
             if (!self.check(.rbrace)) {
                 while (true) {
@@ -1190,6 +1133,7 @@ pub const Parser = struct {
 
                     try fields.append(self.allocator, ast.FieldAssignment{
                         .name = field_name.lexeme,
+                        .name_loc = .{ .line = field_name.line, .column = field_name.column },
                         .value = field_value,
                     });
 
@@ -1210,19 +1154,14 @@ pub const Parser = struct {
         }
 
         if (self.match(.check_kw)) {
-            const value = try self.unary();
+            // parse at comparison level to capture arithmetic and comparisons but not logical ops
+            const value = try self.comparison();
 
             var context_frame: ?[]ast.FieldAssignment = null;
             if (self.match(.with_kw)) {
                 _ = try self.consume(.lbrace, "expected '{' after 'with'");
 
                 var frame_fields: std.ArrayList(ast.FieldAssignment) = .empty;
-                errdefer {
-                    for (frame_fields.items) |field| {
-                        ast.deinitExpr(field.value, self.allocator);
-                    }
-                    frame_fields.deinit(self.allocator);
-                }
 
                 if (!self.check(.rbrace)) {
                     while (true) {
@@ -1232,6 +1171,7 @@ pub const Parser = struct {
 
                         try frame_fields.append(self.allocator, ast.FieldAssignment{
                             .name = field_name.lexeme,
+                            .name_loc = .{ .line = field_name.line, .column = field_name.column },
                             .value = field_value,
                         });
 
@@ -1271,6 +1211,49 @@ pub const Parser = struct {
                 },
             };
             return map_error_expr;
+        }
+
+        if (self.match(.ensure_kw)) {
+            // parse full expression for condition, not just unary
+            const condition = try self.logicalOr();
+
+            _ = try self.consume(.else_kw, "expected 'else' after ensure condition");
+            _ = try self.consume(.err_kw, "expected 'err' after 'else'");
+
+            const variant = try self.consume(.identifier, "expected error variant name");
+            _ = try self.consume(.lbrace, "expected '{' after error variant name");
+
+            var fields: std.ArrayList(ast.FieldAssignment) = .empty;
+
+            if (!self.check(.rbrace)) {
+                while (true) {
+                    const field_name = try self.consume(.identifier, "expected field name");
+                    _ = try self.consume(.colon, "expected ':' after field name");
+                    const field_value = try self.expression();
+
+                    try fields.append(self.allocator, ast.FieldAssignment{
+                        .name = field_name.lexeme,
+                        .name_loc = .{ .line = field_name.line, .column = field_name.column },
+                        .value = field_value,
+                    });
+
+                    if (!self.match(.comma)) break;
+                }
+            }
+
+            _ = try self.consume(.rbrace, "expected '}' after error fields");
+
+            const ensure_expr = try self.allocator.create(ast.Expr);
+            ensure_expr.* = ast.Expr{
+                .ensure = ast.EnsureExpr{
+                    .condition = condition,
+                    .error_expr = ast.ErrorExpr{
+                        .variant = variant.lexeme,
+                        .fields = try fields.toOwnedSlice(self.allocator),
+                    },
+                },
+            };
+            return ensure_expr;
         }
 
         if (self.match(.unsafe_cast_kw)) {
@@ -1331,12 +1314,6 @@ pub const Parser = struct {
                 expr = index_expr;
             } else if (self.match(.lparen)) {
                 var args: std.ArrayList(*ast.Expr) = .empty;
-                errdefer {
-                    for (args.items) |arg| {
-                        ast.deinitExpr(arg, self.allocator);
-                    }
-                    args.deinit(self.allocator);
-                }
 
                 if (!self.check(.rparen)) {
                     while (true) {
@@ -1389,6 +1366,7 @@ pub const Parser = struct {
                     .field_access = ast.FieldAccessExpr{
                         .object = expr,
                         .field = field.lexeme,
+                        .field_loc = .{ .line = field.line, .column = field.column },
                     },
                 };
                 expr = field_expr;
@@ -1455,6 +1433,54 @@ pub const Parser = struct {
 
         if (self.match(.identifier)) {
             const token = self.previous();
+
+            // check if this is a variant constructor: UppercaseName or UppercaseName { fields }
+            const is_uppercase = token.lexeme.len > 0 and token.lexeme[0] >= 'A' and token.lexeme[0] <= 'Z';
+
+            if (is_uppercase) {
+                // check if followed by braces for variant with fields
+                if (self.match(.lbrace)) {
+                    var fields: std.ArrayList(ast.FieldAssignment) = .empty;
+
+                    if (!self.check(.rbrace)) {
+                        while (true) {
+                            const field_name = try self.consume(.identifier, "expected field name");
+                            _ = try self.consume(.colon, "expected ':' after field name");
+                            const field_value = try self.expression();
+                            fields.append(self.allocator, ast.FieldAssignment{
+                                .name = field_name.lexeme,
+                                .name_loc = .{ .line = field_name.line, .column = field_name.column },
+                                .value = field_value,
+                            }) catch |err| {
+                                ast.deinitExpr(field_value, self.allocator);
+                                return err;
+                            };
+                            if (!self.match(.comma)) break;
+                            if (self.check(.rbrace)) break;
+                        }
+                    }
+
+                    _ = try self.consume(.rbrace, "expected '}' after variant fields");
+
+                    const expr = try self.allocator.create(ast.Expr);
+                    expr.* = ast.Expr{ .variant_constructor = .{
+                        .variant_name = token.lexeme,
+                        .fields = if (fields.items.len > 0) try fields.toOwnedSlice(self.allocator) else null,
+                        .name_loc = .{ .line = token.line, .column = token.column },
+                    } };
+                    return expr;
+                } else {
+                    // variant without fields (e.g., Nothing, Ok, None)
+                    const expr = try self.allocator.create(ast.Expr);
+                    expr.* = ast.Expr{ .variant_constructor = .{
+                        .variant_name = token.lexeme,
+                        .fields = null,
+                        .name_loc = .{ .line = token.line, .column = token.column },
+                    } };
+                    return expr;
+                }
+            }
+
             const expr = try self.allocator.create(ast.Expr);
             expr.* = ast.Expr{ .identifier = .{
                 .name = token.lexeme,
@@ -1466,12 +1492,6 @@ pub const Parser = struct {
         // Array literal [a, b, c]
         if (self.match(.lbracket)) {
             var elements: std.ArrayList(*ast.Expr) = .empty;
-            errdefer {
-                for (elements.items) |elem| {
-                    ast.deinitExpr(elem, self.allocator);
-                }
-                elements.deinit(self.allocator);
-            }
 
             if (!self.check(.rbracket)) {
                 const first_elem = try self.expression();
@@ -1497,36 +1517,53 @@ pub const Parser = struct {
             return expr;
         }
 
-        // Record literal { field: value, ... }
+        // record literal { field: value, ... } or block expression { stmt; stmt; expr }
+        // lookahead distinguishes: `identifier :` indicates record literal, otherwise block
         if (self.match(.lbrace)) {
-            var fields: std.ArrayList(ast.FieldAssignment) = .empty;
-            errdefer {
-                for (fields.items) |field| {
-                    ast.deinitExpr(field.value, self.allocator);
+            // check if this is a record literal or block expression
+            const is_record = blk: {
+                // empty braces {} - treat as empty record
+                if (self.check(.rbrace)) break :blk true;
+                // if first token is identifier, check if followed by colon
+                if (self.check(.identifier)) {
+                    // look ahead: identifier followed by colon means record literal
+                    if (self.current + 1 < self.tokens.len) {
+                        break :blk self.tokens[self.current + 1].type == .colon;
+                    }
                 }
-                fields.deinit(self.allocator);
-            }
+                // otherwise it's a block expression
+                break :blk false;
+            };
 
-            if (!self.check(.rbrace)) {
-                while (true) {
-                    const field_name = try self.consume(.identifier, "expected field name");
-                    _ = try self.consume(.colon, "expected ':' after field name");
-                    const field_value = try self.expression();
+            if (is_record) {
+                // parse as record literal
+                var fields: std.ArrayList(ast.FieldAssignment) = .empty;
 
-                    try fields.append(self.allocator, ast.FieldAssignment{
-                        .name = field_name.lexeme,
-                        .value = field_value,
-                    });
+                if (!self.check(.rbrace)) {
+                    while (true) {
+                        const field_name = try self.consume(.identifier, "expected field name");
+                        _ = try self.consume(.colon, "expected ':' after field name");
+                        const field_value = try self.expression();
 
-                    if (!self.match(.comma)) break;
+                        try fields.append(self.allocator, ast.FieldAssignment{
+                            .name = field_name.lexeme,
+                            .name_loc = .{ .line = field_name.line, .column = field_name.column },
+                            .value = field_value,
+                        });
+
+                        if (!self.match(.comma)) break;
+                    }
                 }
+
+                _ = try self.consume(.rbrace, "expected '}' after record fields");
+
+                const expr = try self.allocator.create(ast.Expr);
+                expr.* = ast.Expr{ .record_literal = .{ .fields = try fields.toOwnedSlice(self.allocator) } };
+                return expr;
+            } else {
+                // parse as block expression: { stmt; stmt; ... result_expr }
+                return try self.parseBlockExpr();
             }
-
-            _ = try self.consume(.rbrace, "expected '}' after record fields");
-
-            const expr = try self.allocator.create(ast.Expr);
-            expr.* = ast.Expr{ .record_literal = .{ .fields = try fields.toOwnedSlice(self.allocator) } };
-            return expr;
         }
 
         // Anonymous function: function(params) -> ReturnType { body }
@@ -1534,12 +1571,6 @@ pub const Parser = struct {
             _ = try self.consume(.lparen, "expected '(' after 'function'");
 
             var params: std.ArrayList(ast.Param) = .empty;
-            errdefer {
-                for (params.items) |*param| {
-                    ast.deinitType(&param.type_annotation, self.allocator);
-                }
-                params.deinit(self.allocator);
-            }
 
             if (!self.check(.rparen)) {
                 while (true) {
@@ -1585,7 +1616,6 @@ pub const Parser = struct {
             }
 
             var effects: std.ArrayList([]const u8) = .empty;
-            errdefer effects.deinit(self.allocator);
 
             if (self.match(.effects_kw)) {
                 _ = try self.consume(.lbracket, "expected '[' after 'effects'");
@@ -1621,12 +1651,6 @@ pub const Parser = struct {
                 _ = try self.consume(.lbrace, "expected '{' after 'context'");
 
                 var context_items: std.ArrayList(ast.FieldAssignment) = .empty;
-                errdefer {
-                    for (context_items.items) |item| {
-                        ast.deinitExpr(item.value, self.allocator);
-                    }
-                    context_items.deinit(self.allocator);
-                }
 
                 if (!self.check(.rbrace)) {
                     while (true) {
@@ -1636,6 +1660,7 @@ pub const Parser = struct {
 
                         try context_items.append(self.allocator, ast.FieldAssignment{
                             .name = item_name.lexeme,
+                            .name_loc = .{ .line = item_name.line, .column = item_name.column },
                             .value = item_value,
                         });
 
@@ -1659,11 +1684,62 @@ pub const Parser = struct {
             }
         }
 
+        // Match expression
+        if (self.match(.match_kw)) {
+            const value = try self.expression();
+
+            _ = try self.consume(.lbrace, "expected '{' after match value");
+
+            var arms: std.ArrayList(ast.MatchArm) = .empty;
+
+            while (!self.check(.rbrace) and !self.isAtEnd()) {
+                const pattern = try self.parsePattern();
+
+                _ = try self.consume(.arrow, "expected '->' after pattern");
+                const body = try self.expression();
+
+                try arms.append(self.allocator, ast.MatchArm{
+                    .pattern = pattern,
+                    .body = body,
+                });
+                _ = try self.consume(.semicolon, "expected ';' after match arm");
+            }
+
+            _ = try self.consume(.rbrace, "expected '}' after match arms");
+
+            const expr = try self.allocator.create(ast.Expr);
+            expr.* = ast.Expr{
+                .match_expr = ast.MatchExpr{
+                    .value = value,
+                    .arms = try arms.toOwnedSlice(self.allocator),
+                },
+            };
+            return expr;
+        }
+
         // Parenthesized expression
         if (self.match(.lparen)) {
             const expr = try self.expression();
             _ = try self.consume(.rparen, "expected ')' after expression");
             return expr;
+        }
+
+        // report error for unexpected token
+        const token = self.peek();
+        if (self.diagnostics_list) |diag_list| {
+            const error_msg = std.fmt.allocPrint(self.diag_allocator, "unexpected token '{s}'", .{token.lexeme}) catch "unexpected token";
+            diag_list.addError(
+                error_msg,
+                .{
+                    .file = self.source_file,
+                    .line = token.line,
+                    .column = token.column,
+                    .length = token.lexeme.len,
+                },
+                null,
+            ) catch {};
+        } else {
+            std.debug.print("Parse error at line {d}: unexpected token '{s}'\n", .{ token.line, token.lexeme });
         }
 
         return ParseError.UnexpectedToken;
@@ -1683,12 +1759,6 @@ pub const Parser = struct {
             // check for generic type parameters
             if (self.match(.lt)) {
                 var type_args: std.ArrayList(ast.Type) = .empty;
-                errdefer {
-                    for (type_args.items) |*arg| {
-                        ast.deinitType(arg, self.allocator);
-                    }
-                    type_args.deinit(self.allocator);
-                }
 
                 // parse first type argument
                 const first_arg = try self.parseType();
@@ -1722,12 +1792,6 @@ pub const Parser = struct {
         if (self.match(.lbrace)) {
             const loc = ast.Location{ .line = self.previous().line, .column = self.previous().column };
             var fields: std.ArrayList(ast.RecordTypeField) = .empty;
-            errdefer {
-                for (fields.items) |*f| {
-                    ast.deinitType(&f.type_annotation, self.allocator);
-                }
-                fields.deinit(self.allocator);
-            }
 
             if (!self.check(.rbrace)) {
                 while (true) {
@@ -1759,17 +1823,6 @@ pub const Parser = struct {
         if (self.match(.pipe)) {
             const loc = ast.Location{ .line = self.previous().line, .column = self.previous().column };
             var variants: std.ArrayList(ast.UnionVariant) = .empty;
-            errdefer {
-                for (variants.items) |variant| {
-                    if (variant.fields) |vfields| {
-                        for (vfields) |*f| {
-                            ast.deinitType(&f.type_annotation, self.allocator);
-                        }
-                        self.allocator.free(vfields);
-                    }
-                }
-                variants.deinit(self.allocator);
-            }
 
             while (true) {
                 const variant_name = try self.consume(.identifier, "expected variant name");
@@ -1777,12 +1830,6 @@ pub const Parser = struct {
                 var variant_fields: ?[]ast.RecordTypeField = null;
                 if (self.match(.lbrace)) {
                     var vfields: std.ArrayList(ast.RecordTypeField) = .empty;
-                    errdefer {
-                        for (vfields.items) |*f| {
-                            ast.deinitType(&f.type_annotation, self.allocator);
-                        }
-                        vfields.deinit(self.allocator);
-                    }
 
                     if (!self.check(.rbrace)) {
                         while (true) {
@@ -1820,15 +1867,172 @@ pub const Parser = struct {
             } };
         }
 
+        // report error for invalid type syntax
+        const token = self.peek();
+        if (self.diagnostics_list) |diag_list| {
+            const error_msg = std.fmt.allocPrint(self.diag_allocator, "expected type, got '{s}'", .{token.lexeme}) catch "expected type";
+            diag_list.addError(
+                error_msg,
+                .{
+                    .file = self.source_file,
+                    .line = token.line,
+                    .column = token.column,
+                    .length = token.lexeme.len,
+                },
+                null,
+            ) catch {};
+        }
+
         return ParseError.InvalidSyntax;
     }
 
+    // parses a block expression: { stmt; stmt; ... result_expr }
+    // the block contains zero or more statements followed by an optional result expression
+    fn parseBlockExpr(self: *Parser) ParseError!*ast.Expr {
+        var statements: std.ArrayList(ast.Stmt) = .empty;
+
+        var result_expr: ?*ast.Expr = null;
+
+        // parse statements and/or final expression
+        while (!self.check(.rbrace) and !self.isAtEnd()) {
+            // try to parse a statement
+            // if it looks like an expression followed by semicolon, it's a statement
+            // if it's an expression followed by rbrace, it's the result expression
+
+            // check for statement keywords first
+            if (self.check(.const_kw) or self.check(.var_kw) or self.check(.return_kw) or
+                self.check(.if_kw) or self.check(.while_kw) or self.check(.for_kw) or
+                self.check(.match_kw))
+            {
+                const stmt = try self.statement();
+                try statements.append(self.allocator, stmt);
+            } else {
+                // try to parse as expression
+                const expr = try self.expression();
+
+                // if followed by semicolon, it's an expression statement
+                if (self.match(.semicolon)) {
+                    const stmt = ast.Stmt{ .expr_stmt = expr };
+                    try statements.append(self.allocator, stmt);
+                } else if (self.check(.rbrace)) {
+                    // this is the result expression
+                    result_expr = expr;
+                    break;
+                } else {
+                    // unexpected token after expression
+                    ast.deinitExpr(expr, self.allocator);
+                    if (self.diagnostics_list) |diag_list| {
+                        const token = self.peek();
+                        diag_list.addError(
+                            "expected ';' or '}' after expression in block",
+                            .{
+                                .file = self.source_file,
+                                .line = token.line,
+                                .column = token.column,
+                                .length = token.lexeme.len,
+                            },
+                            null,
+                        ) catch {};
+                    }
+                    return ParseError.UnexpectedToken;
+                }
+            }
+        }
+
+        _ = try self.consume(.rbrace, "expected '}' after block");
+
+        const expr = try self.allocator.create(ast.Expr);
+        expr.* = ast.Expr{
+            .block_expr = ast.BlockExpr{
+                .statements = try statements.toOwnedSlice(self.allocator),
+                .result_expr = result_expr,
+            },
+        };
+        return expr;
+    }
+
     fn parsePattern(self: *Parser) ParseError!ast.Pattern {
+        // ok pattern: `ok value` or `ok { value }`
+        if (self.match(.ok_kw)) {
+            var binding: ?[]const u8 = null;
+            if (self.match(.lbrace)) {
+                if (self.match(.identifier)) {
+                    binding = self.previous().lexeme;
+                }
+                _ = try self.consume(.rbrace, "expected '}' after ok pattern binding");
+            } else if (self.match(.identifier)) {
+                binding = self.previous().lexeme;
+            }
+            return ast.Pattern{ .ok_pattern = .{ .binding = binding } };
+        }
+
+        // err pattern: `err { error }` or `err VariantName { fields... }`
+        if (self.match(.err_kw)) {
+            var variant_name: ?[]const u8 = null;
+            var fields: ?[]ast.PatternField = null;
+
+            if (self.match(.identifier)) {
+                variant_name = self.previous().lexeme;
+                if (self.match(.lbrace)) {
+                    fields = try self.parsePatternFields();
+                    _ = try self.consume(.rbrace, "expected '}' after err pattern fields");
+                }
+            } else if (self.match(.lbrace)) {
+                fields = try self.parsePatternFields();
+                _ = try self.consume(.rbrace, "expected '}' after err pattern");
+            }
+            return ast.Pattern{ .err_pattern = .{ .variant_name = variant_name, .fields = fields } };
+        }
+
+        // Some pattern: `Some { value }`
+        if (self.match(.some_kw)) {
+            var binding: ?[]const u8 = null;
+            if (self.match(.lbrace)) {
+                if (self.match(.identifier)) {
+                    binding = self.previous().lexeme;
+                }
+                _ = try self.consume(.rbrace, "expected '}' after Some pattern binding");
+            } else if (self.match(.identifier)) {
+                binding = self.previous().lexeme;
+            }
+            return ast.Pattern{ .some_pattern = .{ .binding = binding } };
+        }
+
+        // None pattern
+        if (self.match(.none_kw)) {
+            return ast.Pattern{ .none_pattern = {} };
+        }
+
+        // null pattern (sugar for None)
+        if (self.match(.null_kw)) {
+            return ast.Pattern{ .none_pattern = {} };
+        }
+
+        // wildcard, identifier, or variant pattern
         if (self.match(.identifier)) {
             const token = self.previous();
             if (std.mem.eql(u8, token.lexeme, "_")) {
                 return ast.Pattern{ .wildcard = {} };
             }
+
+            // check if this is a variant pattern with fields: VariantName { field1, field2 }
+            if (self.match(.lbrace)) {
+                const fields = try self.parsePatternFields();
+                _ = try self.consume(.rbrace, "expected '}' after variant pattern fields");
+                return ast.Pattern{ .variant = .{
+                    .name = token.lexeme,
+                    .fields = fields,
+                } };
+            }
+
+            // check if the identifier starts with uppercase (likely a variant without fields)
+            if (token.lexeme.len > 0 and token.lexeme[0] >= 'A' and token.lexeme[0] <= 'Z') {
+                return ast.Pattern{ .variant = .{
+                    .name = token.lexeme,
+                    .fields = null,
+                } };
+            }
+
             return ast.Pattern{ .identifier = token.lexeme };
         }
 
@@ -1842,7 +2046,44 @@ pub const Parser = struct {
             return ast.Pattern{ .string = token.lexeme };
         }
 
+        // report error for invalid pattern syntax
+        const token = self.peek();
+        if (self.diagnostics_list) |diag_list| {
+            const error_msg = std.fmt.allocPrint(self.diag_allocator, "expected pattern, got '{s}'", .{token.lexeme}) catch "expected pattern";
+            diag_list.addError(
+                error_msg,
+                .{
+                    .file = self.source_file,
+                    .line = token.line,
+                    .column = token.column,
+                    .length = token.lexeme.len,
+                },
+                null,
+            ) catch {};
+        }
+
         return ParseError.InvalidSyntax;
+    }
+
+    fn parsePatternFields(self: *Parser) ParseError!?[]ast.PatternField {
+        var fields: std.ArrayList(ast.PatternField) = .empty;
+
+        if (self.check(.rbrace)) {
+            return null;
+        }
+
+        while (true) {
+            const field_name = try self.consume(.identifier, "expected field name in pattern");
+            try fields.append(self.allocator, ast.PatternField{
+                .name = field_name.lexeme,
+                .pattern = null,
+            });
+
+            if (!self.match(.comma)) break;
+            if (self.check(.rbrace)) break;
+        }
+
+        return try fields.toOwnedSlice(self.allocator);
     }
 
     fn check(self: *const Parser, token_type: TokenType) bool {
@@ -1878,8 +2119,25 @@ pub const Parser = struct {
     fn consume(self: *Parser, token_type: TokenType, message: []const u8) ParseError!Token {
         if (self.check(token_type)) return self.advance();
 
-        std.debug.print("Parse error at line {d}: {s}\n", .{ self.peek().line, message });
-        std.debug.print("Got token: {s} (type: {any})\n", .{ self.peek().lexeme, self.peek().type });
+        const token = self.peek();
+
+        // report error to diagnostics list if available
+        if (self.diagnostics_list) |diag_list| {
+            const error_msg = std.fmt.allocPrint(self.diag_allocator, "{s}, got '{s}'", .{ message, token.lexeme }) catch message;
+            diag_list.addError(
+                error_msg,
+                .{
+                    .file = self.source_file,
+                    .line = token.line,
+                    .column = token.column,
+                    .length = token.lexeme.len,
+                },
+                null,
+            ) catch {};
+        } else {
+            std.debug.print("Parse error at line {d}: {s}\n", .{ token.line, message });
+            std.debug.print("Got token: {s} (type: {any})\n", .{ token.lexeme, token.type });
+        }
 
         return ParseError.UnexpectedToken;
     }
@@ -1892,8 +2150,23 @@ pub const Parser = struct {
             return self.advance();
         }
 
-        std.debug.print("Parse error at line {d}: {s}\n", .{ token.line, message });
-        std.debug.print("Got token: {s} (type: {any})\n", .{ token.lexeme, token.type });
+        // report error to diagnostics list if available
+        if (self.diagnostics_list) |diag_list| {
+            const error_msg = std.fmt.allocPrint(self.diag_allocator, "{s}, got '{s}'", .{ message, token.lexeme }) catch message;
+            diag_list.addError(
+                error_msg,
+                .{
+                    .file = self.source_file,
+                    .line = token.line,
+                    .column = token.column,
+                    .length = token.lexeme.len,
+                },
+                null,
+            ) catch {};
+        } else {
+            std.debug.print("Parse error at line {d}: {s}\n", .{ token.line, message });
+            std.debug.print("Got token: {s} (type: {any})\n", .{ token.lexeme, token.type });
+        }
 
         return ParseError.UnexpectedToken;
     }

@@ -1,5 +1,6 @@
 const std = @import("std");
 const types = @import("types.zig");
+const context = @import("context.zig");
 
 pub const Symbol = union(enum) {
     function: FunctionSymbol,
@@ -20,6 +21,59 @@ pub const Symbol = union(enum) {
             .parameter => |p| p.name,
             .error_type => |e| e.name,
         };
+    }
+
+    /// returns a tag name for this symbol kind (no allocations)
+    pub fn kindName(self: *const Symbol) []const u8 {
+        return switch (self.*) {
+            .function => "function",
+            .variable => "variable",
+            .constant => "constant",
+            .type_def => "type",
+            .domain => "domain",
+            .parameter => "parameter",
+            .error_type => "error",
+        };
+    }
+
+    /// dumps the symbol for debugging
+    pub fn dump(self: *const Symbol, allocator: std.mem.Allocator) void {
+        const name = self.getName();
+        const kind = self.kindName();
+
+        switch (self.*) {
+            .function => |f| {
+                const ret_str = f.return_type.toStr(allocator) catch "?";
+                defer if (ret_str.len > 0 and ret_str[0] != '?') allocator.free(ret_str);
+                std.debug.print("[Symbol] {s} {s}(...) -> {s}\n", .{ kind, name, ret_str });
+            },
+            .variable => |v| {
+                const type_str = v.type_annotation.toStr(allocator) catch "?";
+                defer if (type_str.len > 0 and type_str[0] != '?') allocator.free(type_str);
+                std.debug.print("[Symbol] {s} {s}: {s} (mutable={}, scope={})\n", .{ kind, name, type_str, v.is_mutable, v.scope_level });
+            },
+            .constant => |c| {
+                const type_str = c.type_annotation.toStr(allocator) catch "?";
+                defer if (type_str.len > 0 and type_str[0] != '?') allocator.free(type_str);
+                std.debug.print("[Symbol] {s} {s}: {s} (scope={})\n", .{ kind, name, type_str, c.scope_level });
+            },
+            .type_def => |t| {
+                const type_str = t.underlying.toStr(allocator) catch "?";
+                defer if (type_str.len > 0 and type_str[0] != '?') allocator.free(type_str);
+                std.debug.print("[Symbol] {s} {s} = {s}\n", .{ kind, name, type_str });
+            },
+            .parameter => |p| {
+                const type_str = p.type_annotation.toStr(allocator) catch "?";
+                defer if (type_str.len > 0 and type_str[0] != '?') allocator.free(type_str);
+                std.debug.print("[Symbol] {s} {s}: {s} (inout={}, cap={})\n", .{ kind, name, type_str, p.is_inout, p.is_capability });
+            },
+            .domain => {
+                std.debug.print("[Symbol] {s} {s}\n", .{ kind, name });
+            },
+            .error_type => {
+                std.debug.print("[Symbol] {s} {s}\n", .{ kind, name });
+            },
+        }
     }
 };
 
@@ -74,12 +128,17 @@ pub const Scope = struct {
     scope_level: u32,
     allocator: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator, parent: ?*Scope, scope_level: u32) Scope {
+    // compilation context for interning
+    // types and strings are borrowed from the context's arena
+    compilation_context: *context.CompilationContext,
+
+    pub fn init(ctx: *context.CompilationContext, parent: ?*Scope, scope_level: u32) Scope {
         return .{
             .parent = parent,
-            .symbols = std.StringHashMap(Symbol).init(allocator),
+            .symbols = std.StringHashMap(Symbol).init(ctx.permanentAllocator()),
             .scope_level = scope_level,
-            .allocator = allocator,
+            .allocator = ctx.permanentAllocator(),
+            .compilation_context = ctx,
         };
     }
 
@@ -104,23 +163,27 @@ pub const Scope = struct {
     }
 
     pub fn deinit(self: *Scope) void {
-        // free type annotations in symbols to prevent memory leaks
+        // arena cleanup handles type memory; only the hashmap structure needs deinit
+        self.symbols.deinit();
+    }
+
+    /// dumps all symbols in this scope for debugging
+    pub fn dump(self: *const Scope) void {
+        std.debug.print("[Scope level={}] {} symbols\n", .{ self.scope_level, self.symbols.count() });
         var iter = self.symbols.iterator();
         while (iter.next()) |entry| {
-            switch (entry.value_ptr.*) {
-                .variable => |v| {
-                    v.type_annotation.deinit(self.allocator);
-                },
-                .constant => |c| {
-                    c.type_annotation.deinit(self.allocator);
-                },
-                .parameter => |p| {
-                    p.type_annotation.deinit(self.allocator);
-                },
-                else => {},
-            }
+            std.debug.print("  '{s}': {s}\n", .{ entry.key_ptr.*, entry.value_ptr.kindName() });
         }
-        self.symbols.deinit();
+    }
+
+    /// dumps all symbols in this scope with full type information
+    pub fn dumpFull(self: *const Scope) void {
+        std.debug.print("[Scope level={}] {} symbols\n", .{ self.scope_level, self.symbols.count() });
+        var iter = self.symbols.iterator();
+        while (iter.next()) |entry| {
+            std.debug.print("  ", .{});
+            entry.value_ptr.dump(self.allocator);
+        }
     }
 };
 
@@ -137,13 +200,29 @@ const BuiltinDef = struct {
 };
 
 const builtins = [_]BuiltinDef{
+    // basic print functions
     .{ .name = "println", .params = &.{.{ .name = "str", .param_type = .string_type }}, .return_type = .unit_type, .effects = &.{.io} },
     .{ .name = "print", .params = &.{.{ .name = "str", .param_type = .string_type }}, .return_type = .unit_type, .effects = &.{.io} },
+    .{ .name = "print_i8", .params = &.{.{ .name = "value", .param_type = .i8 }}, .return_type = .unit_type, .effects = &.{.io} },
     .{ .name = "print_i32", .params = &.{.{ .name = "value", .param_type = .i32 }}, .return_type = .unit_type, .effects = &.{.io} },
     .{ .name = "print_i64", .params = &.{.{ .name = "value", .param_type = .i64 }}, .return_type = .unit_type, .effects = &.{.io} },
     .{ .name = "print_f64", .params = &.{.{ .name = "value", .param_type = .f64 }}, .return_type = .unit_type, .effects = &.{.io} },
     .{ .name = "print_bool", .params = &.{.{ .name = "value", .param_type = .bool_type }}, .return_type = .unit_type, .effects = &.{.io} },
     .{ .name = "print_newline", .params = &.{}, .return_type = .unit_type, .effects = &.{.io} },
+    // debug print functions (prints label = value with newline)
+    .{ .name = "dbg_i32", .params = &.{ .{ .name = "label", .param_type = .string_type }, .{ .name = "value", .param_type = .i32 } }, .return_type = .unit_type, .effects = &.{.io} },
+    .{ .name = "dbg_i64", .params = &.{ .{ .name = "label", .param_type = .string_type }, .{ .name = "value", .param_type = .i64 } }, .return_type = .unit_type, .effects = &.{.io} },
+    .{ .name = "dbg_f64", .params = &.{ .{ .name = "label", .param_type = .string_type }, .{ .name = "value", .param_type = .f64 } }, .return_type = .unit_type, .effects = &.{.io} },
+    .{ .name = "dbg_bool", .params = &.{ .{ .name = "label", .param_type = .string_type }, .{ .name = "value", .param_type = .bool_type } }, .return_type = .unit_type, .effects = &.{.io} },
+    .{ .name = "dbg_str", .params = &.{ .{ .name = "label", .param_type = .string_type }, .{ .name = "value", .param_type = .string_type } }, .return_type = .unit_type, .effects = &.{.io} },
+    // result printing (prints "ok: value" or "err: code")
+    .{ .name = "print_result_i32", .params = &.{ .{ .name = "tag", .param_type = .i8 }, .{ .name = "value", .param_type = .i32 }, .{ .name = "error_code", .param_type = .i64 } }, .return_type = .unit_type, .effects = &.{.io} },
+    .{ .name = "print_result_i64", .params = &.{ .{ .name = "tag", .param_type = .i8 }, .{ .name = "value", .param_type = .i64 }, .{ .name = "error_code", .param_type = .i64 } }, .return_type = .unit_type, .effects = &.{.io} },
+    .{ .name = "print_result_f64", .params = &.{ .{ .name = "tag", .param_type = .i8 }, .{ .name = "value", .param_type = .f64 }, .{ .name = "error_code", .param_type = .i64 } }, .return_type = .unit_type, .effects = &.{.io} },
+    .{ .name = "print_result_bool", .params = &.{ .{ .name = "tag", .param_type = .i8 }, .{ .name = "value", .param_type = .bool_type }, .{ .name = "error_code", .param_type = .i64 } }, .return_type = .unit_type, .effects = &.{.io} },
+    // debug result printing (prints "label = ok: value" or "label = err: code")
+    .{ .name = "dbg_result_i32", .params = &.{ .{ .name = "label", .param_type = .string_type }, .{ .name = "tag", .param_type = .i8 }, .{ .name = "value", .param_type = .i32 }, .{ .name = "error_code", .param_type = .i64 } }, .return_type = .unit_type, .effects = &.{.io} },
+    // input
     .{ .name = "read_char", .params = &.{}, .return_type = .i32, .effects = &.{.io} },
 };
 
@@ -151,10 +230,14 @@ pub const SymbolTable = struct {
     global_scope: Scope,
     allocator: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator) SymbolTable {
+    // compilation context for interning
+    compilation_context: *context.CompilationContext,
+
+    pub fn init(ctx: *context.CompilationContext) SymbolTable {
         var table = SymbolTable{
-            .global_scope = Scope.init(allocator, null, 0),
-            .allocator = allocator,
+            .global_scope = Scope.init(ctx, null, 0),
+            .allocator = ctx.permanentAllocator(),
+            .compilation_context = ctx,
         };
         table.registerBuiltins() catch {};
         return table;
@@ -205,38 +288,19 @@ pub const SymbolTable = struct {
     }
 
     pub fn deinit(self: *SymbolTable) void {
-        var iter = self.global_scope.symbols.iterator();
-        while (iter.next()) |entry| {
-            switch (entry.value_ptr.*) {
-                .function => |f| {
-                    // deinit each parameter type before freeing the array
-                    for (f.params) |*param| {
-                        param.deinit(self.allocator);
-                    }
-                    self.allocator.free(f.params);
-                    self.allocator.free(f.param_names);
-
-                    // deinit return type
-                    f.return_type.deinit(self.allocator);
-
-                    self.allocator.free(f.effects);
-                    self.allocator.free(f.is_capability_param);
-                },
-                .type_def => |td| {
-                    td.underlying.deinit(self.allocator);
-                },
-                .variable => |v| {
-                    v.type_annotation.deinit(self.allocator);
-                },
-                .constant => |c| {
-                    c.type_annotation.deinit(self.allocator);
-                },
-                .parameter => |p| {
-                    p.type_annotation.deinit(self.allocator);
-                },
-                else => {},
-            }
-        }
+        // arena cleanup handles type memory; only the hashmap structure needs deinit
         self.global_scope.deinit();
+    }
+
+    /// dumps the symbol table for debugging (summary view)
+    pub fn dump(self: *const SymbolTable) void {
+        std.debug.print("[SymbolTable] global scope:\n", .{});
+        self.global_scope.dump();
+    }
+
+    /// dumps the symbol table with full type information
+    pub fn dumpFull(self: *const SymbolTable) void {
+        std.debug.print("[SymbolTable] global scope (full):\n", .{});
+        self.global_scope.dumpFull();
     }
 };

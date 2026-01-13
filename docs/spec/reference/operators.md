@@ -156,6 +156,40 @@ The `++` operator concatenates strings. Both operands must be `String`.
 
 ---
 
+## Pattern Operators
+
+These operators are valid only within pattern contexts:
+
+```ferrule
+a..b     // exclusive range pattern (a to b-1)
+a..=b    // inclusive range pattern (a to b)
+..       // rest pattern (matches remaining elements)
+|        // or pattern (match either alternative)
+```
+
+The `as` keyword binds a value while matching (reuses the existing `as` keyword):
+
+```ferrule
+n as 0..=9 -> handle(n);  // bind n while matching range
+```
+
+**Examples:**
+
+```ferrule
+match value {
+  0..=9    -> "digit";          // inclusive range
+  10..100  -> "two digits";     // exclusive range
+  n as _   -> handle(n);        // named binding
+  A | B    -> handle_either();  // or pattern
+}
+
+match array {
+  [first, .., last] -> ...;     // rest pattern
+}
+```
+
+---
+
 ## Summary
 
 | Category | Operators | Operand Types |

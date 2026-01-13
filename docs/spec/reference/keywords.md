@@ -41,6 +41,7 @@ These identifiers are reserved and cannot be used as variable, function, or type
 | `if` | conditional |
 | `else` | conditional branch |
 | `match` | pattern matching |
+| `check` | unwrap result, used with `match check` |
 | `for` | iteration |
 | `while` | loop |
 | `break` | exit loop |
@@ -102,6 +103,7 @@ These were in earlier drafts but are **not** in α1:
 | `fn` | Use `function` for all functions |
 | `===` | Use `==` for equality (no triple equals) |
 | `!==` | Use `!=` for inequality |
+| `null` | Use `None` variant of `Maybe<T>` instead |
 
 ---
 
@@ -116,6 +118,7 @@ Some identifiers have special meaning only in specific contexts:
 | `using` | `map_error` | transform function |
 | `volatile` | inline assembly | prevent optimization |
 | `clobber` | inline assembly | register clobber list |
+| `mut` | `View<mut T>` | mutable view |
 
 These can still be used as regular identifiers outside their special contexts.
 
@@ -127,8 +130,9 @@ These can still be used as regular identifiers outside their special contexts.
 |---------|------|
 | `true` | `Bool` |
 | `false` | `Bool` |
-| `null` | `None` variant of `Maybe<T>` |
 | `Unit` | `Unit` type value |
+
+> **Note:** `None` is not a literal but a union variant constructor for `Maybe<T>`. Use `None` directly when constructing optional values: `const x: u32? = None;`
 
 ---
 

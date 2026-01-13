@@ -1,5 +1,6 @@
 const std = @import("std");
 const types = @import("types.zig");
+const context = @import("context.zig");
 
 pub const ErrorDomain = struct {
     name: []const u8,
@@ -41,10 +42,17 @@ pub const Field = struct {
 
 pub const ErrorDomainTable = struct {
     domains: std.StringHashMap(ErrorDomain),
+    allocator: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator) ErrorDomainTable {
+    // compilation context for interning
+    // types and strings are borrowed from the context's arena
+    compilation_context: *context.CompilationContext,
+
+    pub fn init(ctx: *context.CompilationContext) ErrorDomainTable {
         return .{
-            .domains = std.StringHashMap(ErrorDomain).init(allocator),
+            .domains = std.StringHashMap(ErrorDomain).init(ctx.permanentAllocator()),
+            .allocator = ctx.permanentAllocator(),
+            .compilation_context = ctx,
         };
     }
 
@@ -57,10 +65,7 @@ pub const ErrorDomainTable = struct {
     }
 
     pub fn deinit(self: *ErrorDomainTable) void {
-        var iter = self.domains.valueIterator();
-        while (iter.next()) |domain| {
-            domain.deinit(self.domains.allocator);
-        }
+        // arena cleanup handles type memory; only the hashmap structure needs explicit cleanup
         self.domains.deinit();
     }
 };

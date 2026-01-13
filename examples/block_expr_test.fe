@@ -1,0 +1,114 @@
+package example.block_expr_test;
+
+// simple function using block expression for local computation
+function compute_with_block(x: i32, y: i32) -> i32 {
+  const result = {
+    const temp = x + y;
+    const doubled = temp + temp;
+    doubled
+  };
+  return result;
+}
+
+// nested block expressions
+function nested_blocks(a: i32) -> i32 {
+  const outer = {
+    const inner = {
+      a + 10
+    };
+    inner + 5
+  };
+  return outer;
+}
+
+// block expression with multiple statements
+function block_with_statements(n: i32) -> i32 {
+  const value = {
+    const step1 = n + 1;
+    const step2 = step1 + 2;
+    const step3 = step2 + 3;
+    step3
+  };
+  return value;
+}
+
+// block expression returning unit (no result expression)
+function block_returning_unit() -> i32 {
+  const dummy: i32 = {
+    const x: i32 = 42;
+    x
+  };
+  return dummy;
+}
+
+// using block in match expression arms
+function match_with_blocks(n: i32) -> i32 {
+  const result = match n {
+    0 -> {
+      const zero_result: i32 = 100;
+      zero_result
+    };
+    1 -> {
+      const one_result: i32 = 200;
+      one_result
+    };
+    _ -> {
+      const default_result: i32 = 300;
+      default_result
+    };
+  };
+  return result;
+}
+
+// main function to test all block expression scenarios
+function main(cap io: Io) -> i32 effects [io] {
+  println("=== block expression tests ===");
+  println("");
+
+  // test 1: simple block computation
+  println("test 1: simple block computation");
+  const r1 = compute_with_block(3, 4);
+  print("  compute_with_block(3, 4) = ");
+  print_i32(r1);
+  print_newline();
+
+  // test 2: nested blocks
+  println("test 2: nested blocks");
+  const r2 = nested_blocks(10);
+  print("  nested_blocks(10) = ");
+  print_i32(r2);
+  print_newline();
+
+  // test 3: block with multiple statements
+  println("test 3: block with multiple statements");
+  const r3 = block_with_statements(0);
+  print("  block_with_statements(0) = ");
+  print_i32(r3);
+  print_newline();
+
+  // test 4: block returning value
+  println("test 4: block returning unit");
+  const r4 = block_returning_unit();
+  print("  block_returning_unit() = ");
+  print_i32(r4);
+  print_newline();
+
+  // test 5: match with block arms
+  println("test 5: match with block arms");
+  const r5a = match_with_blocks(0);
+  const r5b = match_with_blocks(1);
+  const r5c = match_with_blocks(99);
+  print("  match_with_blocks(0) = ");
+  print_i32(r5a);
+  print_newline();
+  print("  match_with_blocks(1) = ");
+  print_i32(r5b);
+  print_newline();
+  print("  match_with_blocks(99) = ");
+  print_i32(r5c);
+  print_newline();
+
+  println("");
+  println("=== all block expression tests passed ===");
+  return 0;
+}

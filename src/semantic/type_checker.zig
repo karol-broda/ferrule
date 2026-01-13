@@ -2,16 +2,20 @@ const std = @import("std");
 const ast = @import("../ast.zig");
 const types = @import("../types.zig");
 const symbol_table = @import("../symbol_table.zig");
+const error_domains = @import("../error_domains.zig");
 const diagnostics = @import("../diagnostics.zig");
 const typed_ast = @import("../typed_ast.zig");
 const type_resolver = @import("type_resolver.zig");
 const hover_info = @import("../hover_info.zig");
 const symbol_locations = @import("../symbol_locations.zig");
+const context = @import("../context.zig");
 
 pub const TypeChecker = struct {
     symbols: *symbol_table.SymbolTable,
     current_scope: *symbol_table.Scope,
     current_function: ?*symbol_table.FunctionSymbol,
+    current_function_error_domain: ?[]const u8,
+    domains: ?*error_domains.ErrorDomainTable,
     diagnostics_list: *diagnostics.DiagnosticList,
     allocator: std.mem.Allocator,
     source_file: []const u8,
@@ -19,8 +23,12 @@ pub const TypeChecker = struct {
     hover_table: *hover_info.HoverInfoTable,
     location_table: *symbol_locations.SymbolLocationTable,
 
+    // compilation context for arena-based memory management
+    // types are interned for deduplication and simplified cleanup
+    compilation_context: *context.CompilationContext,
+
     pub fn init(
-        allocator: std.mem.Allocator,
+        ctx: *context.CompilationContext,
         symbols: *symbol_table.SymbolTable,
         diagnostics_list: *diagnostics.DiagnosticList,
         source_file: []const u8,
@@ -31,13 +39,31 @@ pub const TypeChecker = struct {
             .symbols = symbols,
             .current_scope = &symbols.global_scope,
             .current_function = null,
+            .current_function_error_domain = null,
+            .domains = null,
             .diagnostics_list = diagnostics_list,
-            .allocator = allocator,
+            .allocator = ctx.permanentAllocator(),
             .source_file = source_file,
-            .type_resolver = type_resolver.TypeResolver.init(allocator, symbols, diagnostics_list, source_file),
+            .type_resolver = type_resolver.TypeResolver.init(ctx, symbols, diagnostics_list, source_file),
             .hover_table = hover_table,
             .location_table = location_table,
+            .compilation_context = ctx,
         };
+    }
+
+    // interns a type in the context's arena
+    fn internType(self: *TypeChecker, resolved_type: types.ResolvedType) !types.ResolvedType {
+        const interned = try self.compilation_context.internType(resolved_type);
+        return interned.*;
+    }
+
+    // creates a scope using the context
+    fn createScope(self: *TypeChecker, parent: ?*symbol_table.Scope, scope_level: u32) symbol_table.Scope {
+        return symbol_table.Scope.init(self.compilation_context, parent, scope_level);
+    }
+
+    pub fn setDomainTable(self: *TypeChecker, domains: *error_domains.ErrorDomainTable) void {
+        self.domains = domains;
     }
 
     pub fn checkModule(self: *TypeChecker, module: ast.Module) std.mem.Allocator.Error!typed_ast.TypedModule {
@@ -79,7 +105,7 @@ pub const TypeChecker = struct {
     }
 
     fn checkFunctionDecl(self: *TypeChecker, func: ast.FunctionDecl) !void {
-        var new_scope = symbol_table.Scope.init(self.allocator, self.current_scope, self.current_scope.scope_level + 1);
+        var new_scope = self.createScope(self.current_scope, self.current_scope.scope_level + 1);
         defer new_scope.deinit();
 
         const prev_scope = self.current_scope;
@@ -92,6 +118,7 @@ pub const TypeChecker = struct {
             if (symbol == .function) {
                 var func_symbol = symbol.function;
                 self.current_function = &func_symbol;
+                self.current_function_error_domain = func_symbol.error_domain;
 
                 // collect parameter names for hover
                 var param_names = try self.allocator.alloc([]const u8, func.params.len);
@@ -115,10 +142,14 @@ pub const TypeChecker = struct {
 
                 // use already-resolved parameter types from Pass 2
                 for (func.params, func_symbol.params) |param, param_type| {
+                    // use cloneOrIntern to handle ownership correctly
+                    // when context is available, type is interned and shared
+                    // otherwise, clone so the local scope owns its own copy
+                    const local_type = try self.internType(param_type);
                     const param_symbol = symbol_table.Symbol{
                         .parameter = .{
                             .name = param.name,
-                            .type_annotation = param_type,
+                            .type_annotation = local_type,
                             .is_inout = param.is_inout,
                             .is_capability = param.is_capability,
                         },
@@ -143,14 +174,14 @@ pub const TypeChecker = struct {
         }
 
         self.current_function = null;
+        self.current_function_error_domain = null;
     }
 
     fn checkConstDecl(self: *TypeChecker, const_decl: ast.ConstDecl) !void {
         const value_typed = try self.checkExpr(const_decl.value);
-        defer {
-            // only deinit effects array, not the resolved_type since it's transferred to final_type
-            self.allocator.free(value_typed.effects);
-        }
+        defer self.allocator.free(value_typed.effects);
+
+        // types are interned via context and don't need manual cleanup
 
         // require explicit type annotation for numeric literals
         if (const_decl.type_annotation == null and self.isNumericLiteral(const_decl.value)) {
@@ -171,11 +202,9 @@ pub const TypeChecker = struct {
         }
 
         var final_type = value_typed.resolved_type;
-        var should_deinit_value_type = false;
 
         if (const_decl.type_annotation) |type_annotation| {
             const declared_type = try self.type_resolver.resolve(type_annotation);
-            should_deinit_value_type = true;
             final_type = declared_type;
 
             // allow numeric literals to unify with the declared type
@@ -203,10 +232,6 @@ pub const TypeChecker = struct {
             }
         }
 
-        if (should_deinit_value_type) {
-            value_typed.resolved_type.deinit(self.allocator);
-        }
-
         const const_symbol = symbol_table.Symbol{
             .constant = .{
                 .name = const_decl.name,
@@ -231,6 +256,8 @@ pub const TypeChecker = struct {
         const value_typed = try self.checkExpr(var_decl.value);
         defer self.allocator.free(value_typed.effects);
 
+        // types are interned via context and don't need manual cleanup
+
         // require explicit type annotation for numeric literals
         if (var_decl.type_annotation == null and self.isNumericLiteral(var_decl.value)) {
             try self.diagnostics_list.addError(
@@ -250,11 +277,9 @@ pub const TypeChecker = struct {
         }
 
         var final_type = value_typed.resolved_type;
-        var should_deinit_value_type = false;
 
         if (var_decl.type_annotation) |type_annotation| {
             const declared_type = try self.type_resolver.resolve(type_annotation);
-            should_deinit_value_type = true;
             final_type = declared_type;
 
             // allow numeric literals to unify with the declared type
@@ -282,10 +307,6 @@ pub const TypeChecker = struct {
             }
         }
 
-        if (should_deinit_value_type) {
-            value_typed.resolved_type.deinit(self.allocator);
-        }
-
         const var_symbol = symbol_table.Symbol{
             .variable = .{
                 .name = var_decl.name,
@@ -310,39 +331,88 @@ pub const TypeChecker = struct {
     pub fn checkReturnStmt(self: *TypeChecker, return_stmt: ast.ReturnStmt) !void {
         if (self.current_function) |func| {
             if (return_stmt.value) |expr| {
-                const expr_typed = try self.checkExpr(expr);
-                defer {
-                    expr_typed.resolved_type.deinit(self.allocator);
-                    self.allocator.free(expr_typed.effects);
-                }
+                var expr_typed = try self.checkExpr(expr);
+                defer expr_typed.deinit();
 
-                // allow numeric literals to unify with the expected return type
-                const types_match = func.return_type.eql(&expr_typed.resolved_type) or
-                    self.canUnifyNumericLiteral(expr, &expr_typed.resolved_type, &func.return_type);
+                // for functions with error domains, validate the Result's ok_type matches the declared return type
+                if (self.current_function_error_domain != null) {
+                    if (expr_typed.resolved_type == .result) {
+                        const result_ok_type = expr_typed.resolved_type.result.ok_type;
 
-                if (!types_match) {
-                    var expected_buf = std.ArrayList(u8){};
-                    defer expected_buf.deinit(self.allocator);
-                    try func.return_type.format("", .{}, expected_buf.writer(self.allocator));
+                        // err expressions return Result<Unit, E> which is valid for any return type
+                        // since the error path never produces a value
+                        const is_error_return = result_ok_type.* == .unit_type and expr.* == .err;
 
-                    var got_buf = std.ArrayList(u8){};
-                    defer got_buf.deinit(self.allocator);
-                    try expr_typed.resolved_type.format("", .{}, got_buf.writer(self.allocator));
+                        const types_match = is_error_return or
+                            func.return_type.eql(result_ok_type) or
+                            self.canUnifyNumericLiteral(expr, result_ok_type, &func.return_type);
 
-                    try self.diagnostics_list.addError(
-                        try std.fmt.allocPrint(
-                            self.allocator,
-                            "return type mismatch: expected {s}, got {s}",
-                            .{ expected_buf.items, got_buf.items },
-                        ),
-                        .{
-                            .file = self.source_file,
-                            .line = return_stmt.loc.line,
-                            .column = return_stmt.loc.column,
-                            .length = 6,
-                        },
-                        null,
-                    );
+                        if (!types_match) {
+                            var expected_buf = std.ArrayList(u8){};
+                            defer expected_buf.deinit(self.allocator);
+                            try func.return_type.format("", .{}, expected_buf.writer(self.allocator));
+
+                            var got_buf = std.ArrayList(u8){};
+                            defer got_buf.deinit(self.allocator);
+                            try result_ok_type.format("", .{}, got_buf.writer(self.allocator));
+
+                            try self.diagnostics_list.addError(
+                                try std.fmt.allocPrint(
+                                    self.allocator,
+                                    "return type mismatch: expected ok type {s}, got {s}",
+                                    .{ expected_buf.items, got_buf.items },
+                                ),
+                                .{
+                                    .file = self.source_file,
+                                    .line = return_stmt.loc.line,
+                                    .column = return_stmt.loc.column,
+                                    .length = 6,
+                                },
+                                null,
+                            );
+                        }
+                    } else {
+                        // in a function with error domain, must return via ok/err
+                        try self.diagnostics_list.addError(
+                            try self.allocator.dupe(u8, "functions with error clause must return via 'ok' or 'err'"),
+                            .{
+                                .file = self.source_file,
+                                .line = return_stmt.loc.line,
+                                .column = return_stmt.loc.column,
+                                .length = 6,
+                            },
+                            null,
+                        );
+                    }
+                } else {
+                    // no error domain - standard return type checking
+                    const types_match = func.return_type.eql(&expr_typed.resolved_type) or
+                        self.canUnifyNumericLiteral(expr, &expr_typed.resolved_type, &func.return_type);
+
+                    if (!types_match) {
+                        var expected_buf = std.ArrayList(u8){};
+                        defer expected_buf.deinit(self.allocator);
+                        try func.return_type.format("", .{}, expected_buf.writer(self.allocator));
+
+                        var got_buf = std.ArrayList(u8){};
+                        defer got_buf.deinit(self.allocator);
+                        try expr_typed.resolved_type.format("", .{}, got_buf.writer(self.allocator));
+
+                        try self.diagnostics_list.addError(
+                            try std.fmt.allocPrint(
+                                self.allocator,
+                                "return type mismatch: expected {s}, got {s}",
+                                .{ expected_buf.items, got_buf.items },
+                            ),
+                            .{
+                                .file = self.source_file,
+                                .line = return_stmt.loc.line,
+                                .column = return_stmt.loc.column,
+                                .length = 6,
+                            },
+                            null,
+                        );
+                    }
                 }
             } else {
                 if (func.return_type != .unit_type) {
@@ -362,17 +432,13 @@ pub const TypeChecker = struct {
     }
 
     fn checkExprStmt(self: *TypeChecker, expr: *ast.Expr) !void {
-        const typed_expr = try self.checkExpr(expr);
-        typed_expr.resolved_type.deinit(self.allocator);
-        self.allocator.free(typed_expr.effects);
+        var typed_expr = try self.checkExpr(expr);
+        typed_expr.deinit();
     }
 
     pub fn checkAssignStmt(self: *TypeChecker, assign: ast.AssignStmt) !void {
-        const value_typed = try self.checkExpr(assign.value);
-        defer {
-            value_typed.resolved_type.deinit(self.allocator);
-            self.allocator.free(value_typed.effects);
-        }
+        var value_typed = try self.checkExpr(assign.value);
+        defer value_typed.deinit();
 
         // track reference to the assignment target
         try self.location_table.addReference(
@@ -467,11 +533,9 @@ pub const TypeChecker = struct {
     }
 
     pub fn checkIfStmt(self: *TypeChecker, if_stmt: ast.IfStmt) !void {
-        const condition_typed = try self.checkExpr(if_stmt.condition);
-        defer {
-            condition_typed.resolved_type.deinit(self.allocator);
-            self.allocator.free(condition_typed.effects);
-        }
+        var condition_typed = try self.checkExpr(if_stmt.condition);
+        defer condition_typed.deinit();
+        const cond_loc = if_stmt.condition.getLocation() orelse ast.Location{ .line = 0, .column = 0, .length = 0 };
         if (condition_typed.resolved_type != .bool_type) {
             try self.diagnostics_list.addError(
                 try std.fmt.allocPrint(
@@ -481,9 +545,9 @@ pub const TypeChecker = struct {
                 ),
                 .{
                     .file = self.source_file,
-                    .line = 0,
-                    .column = 0,
-                    .length = 0,
+                    .line = cond_loc.line,
+                    .column = cond_loc.column,
+                    .length = cond_loc.length,
                 },
                 null,
             );
@@ -501,11 +565,9 @@ pub const TypeChecker = struct {
     }
 
     pub fn checkWhileStmt(self: *TypeChecker, while_stmt: ast.WhileStmt) !void {
-        const condition_typed = try self.checkExpr(while_stmt.condition);
-        defer {
-            condition_typed.resolved_type.deinit(self.allocator);
-            self.allocator.free(condition_typed.effects);
-        }
+        var condition_typed = try self.checkExpr(while_stmt.condition);
+        defer condition_typed.deinit();
+        const cond_loc = while_stmt.condition.getLocation() orelse ast.Location{ .line = 0, .column = 0, .length = 0 };
         if (condition_typed.resolved_type != .bool_type) {
             try self.diagnostics_list.addError(
                 try std.fmt.allocPrint(
@@ -515,9 +577,9 @@ pub const TypeChecker = struct {
                 ),
                 .{
                     .file = self.source_file,
-                    .line = 0,
-                    .column = 0,
-                    .length = 0,
+                    .line = cond_loc.line,
+                    .column = cond_loc.column,
+                    .length = cond_loc.length,
                 },
                 null,
             );
@@ -529,25 +591,23 @@ pub const TypeChecker = struct {
     }
 
     fn checkForStmt(self: *TypeChecker, for_stmt: ast.ForStmt) !void {
-        const iterable_typed = try self.checkExpr(for_stmt.iterable);
-        defer {
-            self.allocator.free(iterable_typed.effects);
-        }
+        var iterable_typed = try self.checkExpr(for_stmt.iterable);
 
-        var new_scope = symbol_table.Scope.init(self.allocator, self.current_scope, self.current_scope.scope_level + 1);
+        var new_scope = self.createScope(self.current_scope, self.current_scope.scope_level + 1);
         defer new_scope.deinit();
 
         const prev_scope = self.current_scope;
         defer self.current_scope = prev_scope;
         self.current_scope = &new_scope;
 
+        // types are arena-managed via compilation context, no clone needed
         const element_type = switch (iterable_typed.resolved_type) {
-            .array => |arr| try arr.element_type.clone(self.allocator),
-            .view => |view| try view.element_type.clone(self.allocator),
-            .range => |r| try r.element_type.clone(self.allocator),
+            .array => |arr| arr.element_type.*,
+            .view => |view| view.element_type.*,
+            .range => |r| r.element_type.*,
             else => types.ResolvedType.unit_type,
         };
-        defer iterable_typed.resolved_type.deinit(self.allocator);
+        defer iterable_typed.deinit();
 
         // add iterator variable to scope
         const iterator_symbol = symbol_table.Symbol{
@@ -575,17 +635,326 @@ pub const TypeChecker = struct {
     }
 
     fn checkMatchStmt(self: *TypeChecker, match_stmt: ast.MatchStmt) !void {
-        const value_typed = try self.checkExpr(match_stmt.value);
-        defer {
-            value_typed.resolved_type.deinit(self.allocator);
-            self.allocator.free(value_typed.effects);
-        }
+        var value_typed = try self.checkExpr(match_stmt.value);
+        defer value_typed.deinit();
+
+        // types are arena-managed, no clone needed
+        const match_type = value_typed.resolved_type;
 
         for (match_stmt.arms) |arm| {
-            const arm_typed = try self.checkExpr(arm.body);
-            defer {
-                arm_typed.resolved_type.deinit(self.allocator);
-                self.allocator.free(arm_typed.effects);
+            // validate pattern against the matched value type
+            try self.checkPattern(arm.pattern, match_type);
+
+            // create a new scope for each arm to bind pattern variables
+            var arm_scope = self.createScope(self.current_scope, self.current_scope.scope_level + 1);
+            defer arm_scope.deinit();
+
+            const prev_scope = self.current_scope;
+            defer self.current_scope = prev_scope;
+            self.current_scope = &arm_scope;
+
+            // bind pattern variables to the arm scope
+            try self.bindPatternVariables(arm.pattern, match_type);
+
+            var arm_typed = try self.checkExpr(arm.body);
+            defer arm_typed.deinit();
+        }
+    }
+
+    /// validates that a pattern is compatible with the matched type
+    fn checkPattern(self: *TypeChecker, pattern: ast.Pattern, match_type: types.ResolvedType) !void {
+        switch (pattern) {
+            .wildcard, .identifier => {
+                // wildcard and identifier patterns match any type
+            },
+            .number => {
+                // number patterns should match integer or float types
+                const is_numeric = switch (match_type) {
+                    .i8, .i16, .i32, .i64, .i128, .u8, .u16, .u32, .u64, .u128, .usize_type, .f16, .f32, .f64 => true,
+                    else => false,
+                };
+                if (!is_numeric) {
+                    try self.diagnostics_list.addError(
+                        try self.allocator.dupe(u8, "number pattern cannot match non-numeric type"),
+                        .{
+                            .file = self.source_file,
+                            .line = 0,
+                            .column = 0,
+                            .length = 0,
+                        },
+                        null,
+                    );
+                }
+            },
+            .string => {
+                // string patterns should match string type
+                if (match_type != .string_type) {
+                    try self.diagnostics_list.addError(
+                        try self.allocator.dupe(u8, "string pattern cannot match non-string type"),
+                        .{
+                            .file = self.source_file,
+                            .line = 0,
+                            .column = 0,
+                            .length = 0,
+                        },
+                        null,
+                    );
+                }
+            },
+            .variant => |v| {
+                // variant patterns should match union types
+                try self.checkVariantPattern(v.name, v.fields, match_type);
+            },
+            .ok_pattern, .err_pattern => {
+                // result patterns should match result types
+                if (match_type != .result) {
+                    try self.diagnostics_list.addError(
+                        try self.allocator.dupe(u8, "ok/err pattern can only match Result types"),
+                        .{
+                            .file = self.source_file,
+                            .line = 0,
+                            .column = 0,
+                            .length = 0,
+                        },
+                        null,
+                    );
+                }
+            },
+            .some_pattern, .none_pattern => {
+                // maybe patterns should match nullable types
+                if (match_type != .nullable) {
+                    try self.diagnostics_list.addError(
+                        try self.allocator.dupe(u8, "Some/None pattern can only match Maybe (nullable) types"),
+                        .{
+                            .file = self.source_file,
+                            .line = 0,
+                            .column = 0,
+                            .length = 0,
+                        },
+                        null,
+                    );
+                }
+            },
+        }
+    }
+
+    /// checks that a variant pattern matches a valid variant in the union type
+    fn checkVariantPattern(self: *TypeChecker, variant_name: []const u8, pattern_fields: ?[]ast.PatternField, match_type: types.ResolvedType) !void {
+        // resolve named types to their underlying union type
+        const union_type = switch (match_type) {
+            .union_type => match_type,
+            .named => |n| if (n.underlying.* == .union_type) n.underlying.* else {
+                try self.diagnostics_list.addError(
+                    try std.fmt.allocPrint(
+                        self.allocator,
+                        "variant pattern '{s}' cannot match non-union type",
+                        .{variant_name},
+                    ),
+                    .{
+                        .file = self.source_file,
+                        .line = 0,
+                        .column = 0,
+                        .length = 0,
+                    },
+                    null,
+                );
+                return;
+            },
+            else => {
+                try self.diagnostics_list.addError(
+                    try std.fmt.allocPrint(
+                        self.allocator,
+                        "variant pattern '{s}' cannot match non-union type",
+                        .{variant_name},
+                    ),
+                    .{
+                        .file = self.source_file,
+                        .line = 0,
+                        .column = 0,
+                        .length = 0,
+                    },
+                    null,
+                );
+                return;
+            },
+        };
+
+        // find the variant in the union type
+        var found_variant: ?types.UnionVariantInfo = null;
+        for (union_type.union_type.variants) |variant| {
+            if (std.mem.eql(u8, variant.name, variant_name)) {
+                found_variant = variant;
+                break;
+            }
+        }
+
+        if (found_variant == null) {
+            var variant_names: std.ArrayList(u8) = .empty;
+            defer variant_names.deinit(self.allocator);
+            for (union_type.union_type.variants, 0..) |variant, i| {
+                if (i > 0) {
+                    try variant_names.appendSlice(self.allocator, ", ");
+                }
+                try variant_names.appendSlice(self.allocator, variant.name);
+            }
+            try self.diagnostics_list.addError(
+                try std.fmt.allocPrint(
+                    self.allocator,
+                    "unknown variant '{s}' in pattern. available variants: {s}",
+                    .{ variant_name, variant_names.items },
+                ),
+                .{
+                    .file = self.source_file,
+                    .line = 0,
+                    .column = 0,
+                    .length = 0,
+                },
+                null,
+            );
+            return;
+        }
+
+        const variant = found_variant.?;
+
+        // check pattern fields match variant fields
+        if (pattern_fields) |fields| {
+            for (fields) |pattern_field| {
+                var field_found = false;
+                for (variant.field_names) |field_name| {
+                    if (std.mem.eql(u8, field_name, pattern_field.name)) {
+                        field_found = true;
+                        break;
+                    }
+                }
+                if (!field_found) {
+                    try self.diagnostics_list.addError(
+                        try std.fmt.allocPrint(
+                            self.allocator,
+                            "variant '{s}' has no field named '{s}'",
+                            .{ variant_name, pattern_field.name },
+                        ),
+                        .{
+                            .file = self.source_file,
+                            .line = 0,
+                            .column = 0,
+                            .length = 0,
+                        },
+                        null,
+                    );
+                }
+            }
+        }
+    }
+
+    /// binds variables from a pattern to the current scope
+    fn bindPatternVariables(self: *TypeChecker, pattern: ast.Pattern, match_type: types.ResolvedType) !void {
+        switch (pattern) {
+            .identifier => |name| {
+                // bind the matched value to this name
+                // types are arena-managed, no clone needed
+                const var_symbol = symbol_table.Symbol{
+                    .constant = .{
+                        .name = name,
+                        .type_annotation = match_type,
+                        .scope_level = self.current_scope.scope_level,
+                    },
+                };
+                try self.current_scope.insert(name, var_symbol);
+            },
+            .variant => |v| {
+                // bind variant fields to local variables
+                try self.bindVariantFields(v.name, v.fields, match_type);
+            },
+            .ok_pattern => |ok| {
+                if (ok.binding) |binding_name| {
+                    if (match_type == .result) {
+                        // types are arena-managed, no clone needed
+                        const var_symbol = symbol_table.Symbol{
+                            .constant = .{
+                                .name = binding_name,
+                                .type_annotation = match_type.result.ok_type.*,
+                                .scope_level = self.current_scope.scope_level,
+                            },
+                        };
+                        try self.current_scope.insert(binding_name, var_symbol);
+                    }
+                }
+            },
+            .err_pattern => |err| {
+                if (err.fields) |fields| {
+                    for (fields) |field| {
+                        // bind error fields - for now just bind as unit type
+                        // proper error domain field resolution would require more context
+                        const var_symbol = symbol_table.Symbol{
+                            .constant = .{
+                                .name = field.name,
+                                .type_annotation = types.ResolvedType.unit_type,
+                                .scope_level = self.current_scope.scope_level,
+                            },
+                        };
+                        try self.current_scope.insert(field.name, var_symbol);
+                    }
+                }
+            },
+            .some_pattern => |some| {
+                if (some.binding) |binding_name| {
+                    if (match_type == .nullable) {
+                        // types are arena-managed, no clone needed
+                        const var_symbol = symbol_table.Symbol{
+                            .constant = .{
+                                .name = binding_name,
+                                .type_annotation = match_type.nullable.*,
+                                .scope_level = self.current_scope.scope_level,
+                            },
+                        };
+                        try self.current_scope.insert(binding_name, var_symbol);
+                    }
+                }
+            },
+            .wildcard, .number, .string, .none_pattern => {
+                // these patterns don't bind any variables
+            },
+        }
+    }
+
+    /// binds variant fields to local scope variables
+    fn bindVariantFields(self: *TypeChecker, variant_name: []const u8, pattern_fields: ?[]ast.PatternField, match_type: types.ResolvedType) !void {
+        // resolve to union type
+        const union_type = switch (match_type) {
+            .union_type => match_type,
+            .named => |n| if (n.underlying.* == .union_type) n.underlying.* else return,
+            else => return,
+        };
+
+        // find the variant
+        var found_variant: ?types.UnionVariantInfo = null;
+        for (union_type.union_type.variants) |variant| {
+            if (std.mem.eql(u8, variant.name, variant_name)) {
+                found_variant = variant;
+                break;
+            }
+        }
+
+        if (found_variant == null) return;
+        const variant = found_variant.?;
+
+        if (pattern_fields) |fields| {
+            for (fields) |pattern_field| {
+                // find the field type in the variant
+                for (variant.field_names, 0..) |field_name, i| {
+                    if (std.mem.eql(u8, field_name, pattern_field.name)) {
+                        // types are arena-managed, no clone needed
+                        const var_symbol = symbol_table.Symbol{
+                            .constant = .{
+                                .name = pattern_field.name,
+                                .type_annotation = variant.field_types[i],
+                                .scope_level = self.current_scope.scope_level,
+                            },
+                        };
+                        try self.current_scope.insert(pattern_field.name, var_symbol);
+                        break;
+                    }
+                }
             }
         }
     }
@@ -607,6 +976,7 @@ pub const TypeChecker = struct {
             .index_access => |ia| try self.checkIndexAccess(ia),
             .array_literal => |al| try self.checkArrayLiteral(al),
             .record_literal => |rl| try self.checkRecordLiteral(rl),
+            .variant_constructor => |vc| try self.checkVariantConstructor(vc),
             .range => |r| try self.checkRange(r),
             .ok => |ok_expr| try self.checkOk(ok_expr),
             .err => |ee| try self.checkErr(ee),
@@ -618,7 +988,10 @@ pub const TypeChecker = struct {
             .unsafe_cast => |uc| try self.checkUnsafeCast(uc),
             .comptime_expr => |ce| try self.checkComptimeExpr(ce),
             .context_block => |cb| try self.checkContextBlock(cb),
+            .block_expr => |be| try self.checkBlockExpr(be),
         };
+
+        // types are always interned via context, TypedExpr doesn't own them
 
         return typed_ast.TypedExpr{
             .expr = expr,
@@ -653,8 +1026,8 @@ pub const TypeChecker = struct {
                         ),
                         .{
                             .file = self.source_file,
-                            .line = 0,
-                            .column = 0,
+                            .line = id_expr.loc.line,
+                            .column = id_expr.loc.column,
                             .length = id.len,
                         },
                         null,
@@ -688,8 +1061,8 @@ pub const TypeChecker = struct {
                 id.len,
             );
 
-            // clone the type so callers can safely deinit without affecting the symbol table
-            return try resolved_type.clone(self.allocator);
+            // types are arena-managed, return directly without cloning
+            return resolved_type;
         }
 
         try self.diagnostics_list.addError(
@@ -710,9 +1083,9 @@ pub const TypeChecker = struct {
     }
 
     fn checkBinary(self: *TypeChecker, binary: ast.BinaryExpr) !types.ResolvedType {
-        const left_typed = try self.checkExpr(binary.left);
+        var left_typed = try self.checkExpr(binary.left);
         defer self.allocator.free(left_typed.effects);
-        const right_typed = try self.checkExpr(binary.right);
+        var right_typed = try self.checkExpr(binary.right);
         defer self.allocator.free(right_typed.effects);
 
         // compute span covering the entire binary expression
@@ -740,11 +1113,11 @@ pub const TypeChecker = struct {
             .add, .subtract, .multiply, .divide, .modulo, .concat => {
                 // unify numeric literals
                 if (self.isNumericLiteral(binary.left) and self.isNumericType(&right_typed.resolved_type)) {
-                    left_typed.resolved_type.deinit(self.allocator);
+                    // type is arena-managed, no cleanup needed;
                     return right_typed.resolved_type;
                 }
                 if (self.isNumericLiteral(binary.right) and self.isNumericType(&left_typed.resolved_type)) {
-                    right_typed.resolved_type.deinit(self.allocator);
+                    // type is arena-managed, no cleanup needed;
                     return left_typed.resolved_type;
                 }
 
@@ -762,8 +1135,8 @@ pub const TypeChecker = struct {
                             null,
                         );
                     }
-                    left_typed.resolved_type.deinit(self.allocator);
-                    right_typed.resolved_type.deinit(self.allocator);
+                    // type is arena-managed, no cleanup needed;
+                    // type is arena-managed, no cleanup needed;
                     return types.ResolvedType.string_type;
                 }
 
@@ -792,7 +1165,7 @@ pub const TypeChecker = struct {
                         hint,
                     );
                 }
-                right_typed.resolved_type.deinit(self.allocator);
+                // type is arena-managed, no cleanup needed;
                 return left_typed.resolved_type;
             },
             .eq, .ne, .lt, .gt, .le, .ge => {
@@ -821,8 +1194,8 @@ pub const TypeChecker = struct {
                         null,
                     );
                 }
-                left_typed.resolved_type.deinit(self.allocator);
-                right_typed.resolved_type.deinit(self.allocator);
+                // type is arena-managed, no cleanup needed;
+                // type is arena-managed, no cleanup needed;
                 return types.ResolvedType.bool_type;
             },
             .logical_and, .logical_or => {
@@ -838,12 +1211,12 @@ pub const TypeChecker = struct {
                         null,
                     );
                 }
-                left_typed.resolved_type.deinit(self.allocator);
-                right_typed.resolved_type.deinit(self.allocator);
+                // type is arena-managed, no cleanup needed;
+                // type is arena-managed, no cleanup needed;
                 return types.ResolvedType.bool_type;
             },
             else => {
-                right_typed.resolved_type.deinit(self.allocator);
+                // type is arena-managed, no cleanup needed;
                 return left_typed.resolved_type;
             },
         }
@@ -893,8 +1266,8 @@ pub const TypeChecker = struct {
                             ),
                             .{
                                 .file = self.source_file,
-                                .line = 0,
-                                .column = 0,
+                                .line = callee_loc.line,
+                                .column = callee_loc.column,
                                 .length = func_name.len,
                             },
                             null,
@@ -905,13 +1278,9 @@ pub const TypeChecker = struct {
                     // check if this is a generic function
                     if (func.type_params) |type_params| {
                         // collect argument types for inference
+                        // types are arena-managed, only free the array
                         var arg_types = try self.allocator.alloc(types.ResolvedType, call.args.len);
-                        defer {
-                            for (arg_types) |*at| {
-                                at.deinit(self.allocator);
-                            }
-                            self.allocator.free(arg_types);
-                        }
+                        defer self.allocator.free(arg_types);
 
                         for (call.args, 0..) |arg, i| {
                             const arg_typed = try self.checkExpr(arg);
@@ -922,12 +1291,8 @@ pub const TypeChecker = struct {
                         // infer type arguments from argument types
                         const inferred = try self.inferTypeArgs(type_params, func.params, arg_types);
                         if (inferred) |inferred_args| {
-                            defer {
-                                for (inferred_args) |*ia| {
-                                    ia.deinit(self.allocator);
-                                }
-                                self.allocator.free(inferred_args);
-                            }
+                            // types are arena-managed, only free the array
+                            defer self.allocator.free(inferred_args);
 
                             // substitute type params in return type
                             const param_names = try self.allocator.alloc([]const u8, type_params.len);
@@ -944,11 +1309,8 @@ pub const TypeChecker = struct {
 
                     // non-generic function - regular type checking
                     for (call.args, func.params, 0..) |arg, param_type, i| {
-                        const arg_typed = try self.checkExpr(arg);
-                        defer {
-                            arg_typed.resolved_type.deinit(self.allocator);
-                            self.allocator.free(arg_typed.effects);
-                        }
+                        var arg_typed = try self.checkExpr(arg);
+                        defer arg_typed.deinit();
 
                         // allow numeric literals to unify with parameter types
                         const types_match = arg_typed.resolved_type.eql(&param_type) or
@@ -982,6 +1344,19 @@ pub const TypeChecker = struct {
                         }
                     }
 
+                    // if function has error domain, return Result<T, E>
+                    if (func.error_domain) |domain| {
+                        const ok_type_ptr = try self.allocator.create(types.ResolvedType);
+                        ok_type_ptr.* = func.return_type;
+                        return try self.internType(types.ResolvedType{
+                            .result = .{
+                                .ok_type = ok_type_ptr,
+                                .error_domain = domain,
+                            },
+                        });
+                    }
+
+                    // types are arena-managed, return directly without cloning
                     return func.return_type;
                 }
             }
@@ -1014,12 +1389,9 @@ pub const TypeChecker = struct {
         }
 
         // check all type params were inferred
-        for (inferred_flags, 0..) |flag, i| {
+        for (inferred_flags) |flag| {
             if (!flag) {
-                // free already inferred types
-                for (inferred[0..i]) |*inf| {
-                    inf.deinit(self.allocator);
-                }
+                // types are arena-managed, only free the array
                 self.allocator.free(inferred);
                 return null;
             }
@@ -1042,7 +1414,8 @@ pub const TypeChecker = struct {
                 for (type_params, 0..) |type_param, i| {
                     if (std.mem.eql(u8, tp.name, type_param.name)) {
                         if (!inferred_flags[i]) {
-                            inferred[i] = try arg_type.clone(self.allocator);
+                            // types are arena-managed, no clone needed
+                            inferred[i] = arg_type;
                             inferred_flags[i] = true;
                         }
                         break;
@@ -1069,15 +1442,13 @@ pub const TypeChecker = struct {
     }
 
     fn checkIndexAccess(self: *TypeChecker, index_access: ast.IndexAccessExpr) !types.ResolvedType {
-        const object_typed = try self.checkExpr(index_access.object);
-        defer {
-            self.allocator.free(object_typed.effects);
-        }
-        const index_typed = try self.checkExpr(index_access.index);
-        defer {
-            index_typed.resolved_type.deinit(self.allocator);
-            self.allocator.free(index_typed.effects);
-        }
+        var object_typed = try self.checkExpr(index_access.object);
+        defer self.allocator.free(object_typed.effects);
+        var index_typed = try self.checkExpr(index_access.index);
+        defer index_typed.deinit();
+
+        const index_loc = index_access.index.getLocation() orelse ast.Location{ .line = 0, .column = 0, .length = 0 };
+        const object_loc = index_access.object.getLocation() orelse ast.Location{ .line = 0, .column = 0, .length = 0 };
 
         // Check that index is an integer type
         const is_integer = switch (index_typed.resolved_type) {
@@ -1095,26 +1466,19 @@ pub const TypeChecker = struct {
                 ),
                 .{
                     .file = self.source_file,
-                    .line = 0,
-                    .column = 0,
-                    .length = 0,
+                    .line = index_loc.line,
+                    .column = index_loc.column,
+                    .length = index_loc.length,
                 },
                 null,
             );
         }
 
         // Get element type from array/view
+        // types are arena-managed, no clone needed
         const element_type = switch (object_typed.resolved_type) {
-            .array => |arr| blk: {
-                const elem = try arr.element_type.clone(self.allocator);
-                object_typed.resolved_type.deinit(self.allocator);
-                break :blk elem;
-            },
-            .view => |view| blk: {
-                const elem = try view.element_type.clone(self.allocator);
-                object_typed.resolved_type.deinit(self.allocator);
-                break :blk elem;
-            },
+            .array => |arr| arr.element_type.*,
+            .view => |view| view.element_type.*,
             else => blk: {
                 const type_str = try object_typed.resolved_type.toStr(self.allocator);
                 defer self.allocator.free(type_str);
@@ -1126,13 +1490,13 @@ pub const TypeChecker = struct {
                     ),
                     .{
                         .file = self.source_file,
-                        .line = 0,
-                        .column = 0,
-                        .length = 0,
+                        .line = object_loc.line,
+                        .column = object_loc.column,
+                        .length = object_loc.length,
                     },
                     null,
                 );
-                object_typed.resolved_type.deinit(self.allocator);
+                // type is arena-managed, no cleanup needed;
                 break :blk types.ResolvedType.unit_type;
             },
         };
@@ -1140,26 +1504,177 @@ pub const TypeChecker = struct {
         return element_type;
     }
 
-    fn checkRecordLiteral(self: *TypeChecker, record_literal: ast.RecordLiteralExpr) !types.ResolvedType {
-        for (record_literal.fields) |field| {
-            const field_typed = try self.checkExpr(field.value);
-            defer {
-                field_typed.resolved_type.deinit(self.allocator);
-                self.allocator.free(field_typed.effects);
+    /// checks a variant constructor expression like `Just { value: 42 }` or `Nothing`
+    fn checkVariantConstructor(self: *TypeChecker, variant_ctor: ast.VariantConstructorExpr) !types.ResolvedType {
+        // search through type definitions to find a union type containing this variant
+        var iter = self.symbols.global_scope.symbols.iterator();
+        while (iter.next()) |entry| {
+            const symbol = entry.value_ptr.*;
+            if (symbol == .type_def) {
+                const type_def = symbol.type_def;
+                // check if this type is a union type with the matching variant
+                if (type_def.underlying == .union_type) {
+                    for (type_def.underlying.union_type.variants) |variant| {
+                        if (std.mem.eql(u8, variant.name, variant_ctor.variant_name)) {
+                            // found the union type containing this variant
+                            // check field expressions if present
+                            if (variant_ctor.fields) |fields| {
+                                for (fields) |field| {
+                                    var field_typed = try self.checkExpr(field.value);
+                                    defer field_typed.deinit();
+
+                                    // verify field exists in variant
+                                    var field_found = false;
+                                    for (variant.field_names, 0..) |vf_name, idx| {
+                                        if (std.mem.eql(u8, vf_name, field.name)) {
+                                            field_found = true;
+                                            // check field type matches
+                                            if (!field_typed.resolved_type.eql(&variant.field_types[idx])) {
+                                                const expected_str = try variant.field_types[idx].toStr(self.allocator);
+                                                defer self.allocator.free(expected_str);
+                                                const got_str = try field_typed.resolved_type.toStr(self.allocator);
+                                                defer self.allocator.free(got_str);
+                                                try self.diagnostics_list.addError(
+                                                    try std.fmt.allocPrint(
+                                                        self.allocator,
+                                                        "field '{s}' type mismatch: expected {s}, got {s}",
+                                                        .{ field.name, expected_str, got_str },
+                                                    ),
+                                                    .{
+                                                        .file = self.source_file,
+                                                        .line = variant_ctor.name_loc.line,
+                                                        .column = variant_ctor.name_loc.column,
+                                                        .length = variant_ctor.variant_name.len,
+                                                    },
+                                                    null,
+                                                );
+                                            }
+                                            break;
+                                        }
+                                    }
+                                    if (!field_found) {
+                                        try self.diagnostics_list.addError(
+                                            try std.fmt.allocPrint(
+                                                self.allocator,
+                                                "variant '{s}' has no field named '{s}'",
+                                                .{ variant_ctor.variant_name, field.name },
+                                            ),
+                                            .{
+                                                .file = self.source_file,
+                                                .line = variant_ctor.name_loc.line,
+                                                .column = variant_ctor.name_loc.column,
+                                                .length = variant_ctor.variant_name.len,
+                                            },
+                                            null,
+                                        );
+                                    }
+                                }
+                            }
+
+                            // add hover info for the variant name
+                            try self.hover_table.add(
+                                variant_ctor.name_loc.line,
+                                variant_ctor.name_loc.column,
+                                variant_ctor.variant_name.len,
+                                variant_ctor.variant_name,
+                                .type_def,
+                                type_def.underlying,
+                            );
+
+                            // return the named union type
+                            // intern the type for arena management
+                            const underlying_ptr = try self.allocator.create(types.ResolvedType);
+                            underlying_ptr.* = type_def.underlying;
+                            return try self.internType(types.ResolvedType{
+                                .named = .{
+                                    .name = type_def.name,
+                                    .underlying = underlying_ptr,
+                                },
+                            });
+                        }
+                    }
+                }
             }
         }
+
+        // variant not found in any union type
+        try self.diagnostics_list.addError(
+            try std.fmt.allocPrint(
+                self.allocator,
+                "unknown variant '{s}' - not found in any union type",
+                .{variant_ctor.variant_name},
+            ),
+            .{
+                .file = self.source_file,
+                .line = variant_ctor.name_loc.line,
+                .column = variant_ctor.name_loc.column,
+                .length = variant_ctor.variant_name.len,
+            },
+            null,
+        );
+
         return types.ResolvedType.unit_type;
     }
 
+    fn checkRecordLiteral(self: *TypeChecker, record_literal: ast.RecordLiteralExpr) !types.ResolvedType {
+        // build arrays for field names, types, and locations
+        const field_count = record_literal.fields.len;
+
+        if (field_count == 0) {
+            // empty record is unit type
+            return types.ResolvedType.unit_type;
+        }
+
+        const field_names = try self.allocator.alloc([]const u8, field_count);
+        var names_initialized: usize = 0;
+        errdefer {
+            for (field_names[0..names_initialized]) |name| {
+                self.allocator.free(name);
+            }
+            self.allocator.free(field_names);
+        }
+
+        const field_types = try self.allocator.alloc(types.ResolvedType, field_count);
+        // types are arena-managed, only free the array on error
+        errdefer self.allocator.free(field_types);
+
+        const field_locations = try self.allocator.alloc(types.FieldLocation, field_count);
+        errdefer self.allocator.free(field_locations);
+
+        for (record_literal.fields, 0..) |field, i| {
+            // duplicate field name so it's owned by this type
+            field_names[i] = try self.allocator.dupe(u8, field.name);
+            names_initialized += 1;
+
+            const field_typed = try self.checkExpr(field.value);
+            defer self.allocator.free(field_typed.effects);
+
+            // types are arena-managed, store directly
+            field_types[i] = field_typed.resolved_type;
+
+            // store the field location
+            field_locations[i] = .{
+                .line = field.name_loc.line,
+                .column = field.name_loc.column,
+                .length = field.name.len,
+            };
+        }
+
+        return types.ResolvedType{
+            .record = .{
+                .field_names = field_names,
+                .field_types = field_types,
+                .field_locations = field_locations,
+            },
+        };
+    }
+
     fn checkRange(self: *TypeChecker, range_expr: ast.RangeExpr) !types.ResolvedType {
-        const start_typed = try self.checkExpr(range_expr.start);
+        var start_typed = try self.checkExpr(range_expr.start);
         defer self.allocator.free(start_typed.effects);
 
-        const end_typed = try self.checkExpr(range_expr.end);
-        defer {
-            end_typed.resolved_type.deinit(self.allocator);
-            self.allocator.free(end_typed.effects);
-        }
+        var end_typed = try self.checkExpr(range_expr.end);
+        defer self.allocator.free(end_typed.effects);
 
         if (!start_typed.resolved_type.eql(&end_typed.resolved_type)) {
             const start_str = try start_typed.resolved_type.toStr(self.allocator);
@@ -1184,17 +1699,62 @@ pub const TypeChecker = struct {
     }
 
     fn checkMapError(self: *TypeChecker, map_error_expr: ast.MapErrorExpr) !types.ResolvedType {
+        // get location from inner expression
+        const loc = map_error_expr.expr.getLocation() orelse ast.Location{ .line = 0, .column = 0, .length = 9 };
+
+        // map_error requires an enclosing function with an error domain
+        const current_domain = self.current_function_error_domain orelse {
+            try self.diagnostics_list.addError(
+                try self.allocator.dupe(u8, "'map_error' can only be used in functions with an error clause"),
+                .{
+                    .file = self.source_file,
+                    .line = loc.line,
+                    .column = loc.column,
+                    .length = loc.length,
+                },
+                null,
+            );
+            const expr_typed = try self.checkExpr(map_error_expr.expr);
+            defer self.allocator.free(expr_typed.effects);
+            return expr_typed.resolved_type;
+        };
+
         const expr_typed = try self.checkExpr(map_error_expr.expr);
-        defer {
-            self.allocator.free(expr_typed.effects);
+        defer self.allocator.free(expr_typed.effects);
+
+        // the expression must return a Result type
+        if (expr_typed.resolved_type != .result) {
+            try self.diagnostics_list.addError(
+                try self.allocator.dupe(u8, "'map_error' expression must return a Result type"),
+                .{
+                    .file = self.source_file,
+                    .line = loc.line,
+                    .column = loc.column,
+                    .length = loc.length,
+                },
+                null,
+            );
+            return expr_typed.resolved_type;
         }
-        const transform_typed = try self.checkExpr(map_error_expr.transform);
-        defer {
-            transform_typed.resolved_type.deinit(self.allocator);
-            self.allocator.free(transform_typed.effects);
-        }
-        // Return the type of the original expression (the ok type)
-        return expr_typed.resolved_type;
+
+        const result_type = expr_typed.resolved_type.result;
+
+        // type check the transform expression
+        // the transform receives the error and should return a new error in the current domain
+        var transform_typed = try self.checkExpr(map_error_expr.transform);
+        defer transform_typed.deinit();
+
+        // return Result<T, CurrentDomain> where T is the original ok type
+        const ok_type_ptr = try self.allocator.create(types.ResolvedType);
+        ok_type_ptr.* = result_type.ok_type.*;
+
+        // intern the type for arena management
+        return try self.internType(types.ResolvedType{
+            .result = .{
+                .ok_type = ok_type_ptr,
+                .error_domain = current_domain,
+            },
+        });
     }
 
     fn checkAnonymousFunction(self: *TypeChecker, anon_func: ast.AnonymousFunctionExpr) !types.ResolvedType {
@@ -1231,31 +1791,24 @@ pub const TypeChecker = struct {
 
     fn checkUnsafeCast(self: *TypeChecker, unsafe_cast: ast.UnsafeCastExpr) !types.ResolvedType {
         // Type check the expression being cast
-        const expr_typed = try self.checkExpr(unsafe_cast.expr);
-        defer {
-            expr_typed.resolved_type.deinit(self.allocator);
-            self.allocator.free(expr_typed.effects);
-        }
+        var expr_typed = try self.checkExpr(unsafe_cast.expr);
+        defer expr_typed.deinit();
         // Return the target type
         return try self.type_resolver.resolve(unsafe_cast.target_type);
     }
 
     fn checkComptimeExpr(self: *TypeChecker, comptime_expr: *ast.Expr) !types.ResolvedType {
         const expr_typed = try self.checkExpr(comptime_expr);
-        defer {
-            self.allocator.free(expr_typed.effects);
-        }
+        defer self.allocator.free(expr_typed.effects);
+        // resolved_type is returned directly; caller takes ownership (no deinit here)
         return expr_typed.resolved_type;
     }
 
     fn checkContextBlock(self: *TypeChecker, context_block: ast.ContextBlockExpr) !types.ResolvedType {
         // Type check each context item
         for (context_block.context_items) |item| {
-            const item_typed = try self.checkExpr(item.value);
-            defer {
-                item_typed.resolved_type.deinit(self.allocator);
-                self.allocator.free(item_typed.effects);
-            }
+            var item_typed = try self.checkExpr(item.value);
+            defer item_typed.deinit();
         }
         // Type check body statements
         for (context_block.body) |stmt| {
@@ -1264,70 +1817,555 @@ pub const TypeChecker = struct {
         return types.ResolvedType.unit_type;
     }
 
+    fn checkBlockExpr(self: *TypeChecker, block_expr: ast.BlockExpr) !types.ResolvedType {
+        // create a new scope for the block
+        var block_scope = self.createScope(self.current_scope, self.current_scope.scope_level + 1);
+        defer block_scope.deinit();
+
+        const previous_scope = self.current_scope;
+        self.current_scope = &block_scope;
+        defer self.current_scope = previous_scope;
+
+        // type check each statement in the block
+        for (block_expr.statements) |stmt| {
+            _ = try self.checkStmt(stmt);
+        }
+
+        // if there's a result expression, type check it and return its type
+        if (block_expr.result_expr) |result| {
+            const result_typed = try self.checkExpr(result);
+            defer self.allocator.free(result_typed.effects);
+            // types are arena-managed, return directly
+            return result_typed.resolved_type;
+        }
+
+        // no result expression means the block returns unit
+        return types.ResolvedType.unit_type;
+    }
+
     fn checkFieldAccess(self: *TypeChecker, field_access: ast.FieldAccessExpr) !types.ResolvedType {
         const object_typed = try self.checkExpr(field_access.object);
-        defer {
-            object_typed.resolved_type.deinit(self.allocator);
-            self.allocator.free(object_typed.effects);
+        defer self.allocator.free(object_typed.effects);
+
+        const field_name = field_access.field;
+        const field_loc = field_access.field_loc;
+        const object_type = object_typed.resolved_type;
+
+        // handle field access based on object type
+        switch (object_type) {
+            .record => |rec| {
+                // find the field in the record
+                for (rec.field_names, 0..) |name, i| {
+                    if (std.mem.eql(u8, name, field_name)) {
+                        // get field definition location if available
+                        const field_def_loc: ?hover_info.FieldDefinitionLoc = if (rec.field_locations) |locs|
+                            .{
+                                .line = locs[i].line,
+                                .column = locs[i].column,
+                                .length = locs[i].length,
+                            }
+                        else
+                            null;
+
+                        // add hover info for field access with definition location
+                        try self.hover_table.addWithFieldDef(
+                            field_loc.line,
+                            field_loc.column,
+                            field_name.len,
+                            field_name,
+                            .field,
+                            rec.field_types[i],
+                            field_def_loc,
+                        );
+
+                        // types are arena-managed, return directly
+                        return rec.field_types[i];
+                    }
+                }
+                // field not found
+                try self.diagnostics_list.addError(
+                    try std.fmt.allocPrint(
+                        self.allocator,
+                        "record has no field '{s}'",
+                        .{field_name},
+                    ),
+                    .{ .file = self.source_file, .line = field_loc.line, .column = field_loc.column, .length = field_name.len },
+                    null,
+                );
+                // type is arena-managed, no cleanup needed;
+                return types.ResolvedType.unit_type;
+            },
+            .result => |res| {
+                // result type has special fields: tag, value, error_code
+                if (std.mem.eql(u8, field_name, "tag")) {
+                    // add hover info for Result.tag
+                    try self.hover_table.add(
+                        field_loc.line,
+                        field_loc.column,
+                        field_name.len,
+                        field_name,
+                        .field,
+                        types.ResolvedType.i8,
+                    );
+                    // type is arena-managed, no cleanup needed;
+                    return types.ResolvedType.i8;
+                } else if (std.mem.eql(u8, field_name, "value")) {
+                    // add hover info for Result.value
+                    try self.hover_table.add(
+                        field_loc.line,
+                        field_loc.column,
+                        field_name.len,
+                        field_name,
+                        .field,
+                        res.ok_type.*,
+                    );
+                    // types are arena-managed, return directly
+                    return res.ok_type.*;
+                } else if (std.mem.eql(u8, field_name, "error_code")) {
+                    // add hover info for Result.error_code
+                    try self.hover_table.add(
+                        field_loc.line,
+                        field_loc.column,
+                        field_name.len,
+                        field_name,
+                        .field,
+                        types.ResolvedType.i64,
+                    );
+                    // type is arena-managed, no cleanup needed;
+                    return types.ResolvedType.i64;
+                } else {
+                    try self.diagnostics_list.addError(
+                        try std.fmt.allocPrint(
+                            self.allocator,
+                            "Result type has no field '{s}' (available: tag, value, error_code)",
+                            .{field_name},
+                        ),
+                        .{ .file = self.source_file, .line = field_loc.line, .column = field_loc.column, .length = field_name.len },
+                        null,
+                    );
+                    // type is arena-managed, no cleanup needed;
+                    return types.ResolvedType.unit_type;
+                }
+            },
+            .nullable => |inner| {
+                // nullable type has special fields: has_value, value
+                if (std.mem.eql(u8, field_name, "has_value")) {
+                    // add hover info for nullable.has_value
+                    try self.hover_table.add(
+                        field_loc.line,
+                        field_loc.column,
+                        field_name.len,
+                        field_name,
+                        .field,
+                        types.ResolvedType.bool_type,
+                    );
+                    // type is arena-managed, no cleanup needed;
+                    return types.ResolvedType.bool_type;
+                } else if (std.mem.eql(u8, field_name, "value")) {
+                    // add hover info for nullable.value
+                    try self.hover_table.add(
+                        field_loc.line,
+                        field_loc.column,
+                        field_name.len,
+                        field_name,
+                        .field,
+                        inner.*,
+                    );
+                    // types are arena-managed, return directly
+                    return inner.*;
+                } else {
+                    try self.diagnostics_list.addError(
+                        try std.fmt.allocPrint(
+                            self.allocator,
+                            "nullable type has no field '{s}' (available: has_value, value)",
+                            .{field_name},
+                        ),
+                        .{ .file = self.source_file, .line = field_loc.line, .column = field_loc.column, .length = field_name.len },
+                        null,
+                    );
+                    // type is arena-managed, no cleanup needed;
+                    return types.ResolvedType.unit_type;
+                }
+            },
+            .string_type => {
+                // string type has special fields: ptr, len
+                if (std.mem.eql(u8, field_name, "len")) {
+                    // add hover info for String.len
+                    try self.hover_table.add(
+                        field_loc.line,
+                        field_loc.column,
+                        field_name.len,
+                        field_name,
+                        .field,
+                        types.ResolvedType.i64,
+                    );
+                    // type is arena-managed, no cleanup needed;
+                    return types.ResolvedType.i64;
+                } else if (std.mem.eql(u8, field_name, "ptr")) {
+                    // add hover info for String.ptr
+                    try self.hover_table.add(
+                        field_loc.line,
+                        field_loc.column,
+                        field_name.len,
+                        field_name,
+                        .field,
+                        types.ResolvedType.usize_type,
+                    );
+                    // type is arena-managed, no cleanup needed;
+                    return types.ResolvedType.usize_type;
+                } else {
+                    try self.diagnostics_list.addError(
+                        try std.fmt.allocPrint(
+                            self.allocator,
+                            "String has no field '{s}' (available: ptr, len)",
+                            .{field_name},
+                        ),
+                        .{ .file = self.source_file, .line = field_loc.line, .column = field_loc.column, .length = field_name.len },
+                        null,
+                    );
+                    // type is arena-managed, no cleanup needed;
+                    return types.ResolvedType.unit_type;
+                }
+            },
+            .array => |arr| {
+                // array has len field
+                if (std.mem.eql(u8, field_name, "len")) {
+                    // add hover info for array.len
+                    try self.hover_table.add(
+                        field_loc.line,
+                        field_loc.column,
+                        field_name.len,
+                        field_name,
+                        .field,
+                        types.ResolvedType.usize_type,
+                    );
+                    _ = arr;
+                    // type is arena-managed, no cleanup needed;
+                    return types.ResolvedType.usize_type;
+                } else {
+                    try self.diagnostics_list.addError(
+                        try std.fmt.allocPrint(
+                            self.allocator,
+                            "array has no field '{s}' (available: len)",
+                            .{field_name},
+                        ),
+                        .{ .file = self.source_file, .line = field_loc.line, .column = field_loc.column, .length = field_name.len },
+                        null,
+                    );
+                    // type is arena-managed, no cleanup needed;
+                    return types.ResolvedType.unit_type;
+                }
+            },
+            else => {
+                const type_str = try object_type.toStr(self.allocator);
+                defer self.allocator.free(type_str);
+                try self.diagnostics_list.addError(
+                    try std.fmt.allocPrint(
+                        self.allocator,
+                        "cannot access field '{s}' on type {s}",
+                        .{ field_name, type_str },
+                    ),
+                    .{ .file = self.source_file, .line = field_loc.line, .column = field_loc.column, .length = field_name.len },
+                    null,
+                );
+                // type is arena-managed, no cleanup needed;
+                return types.ResolvedType.unit_type;
+            },
         }
-        _ = field_access.field;
-        return types.ResolvedType.unit_type;
     }
 
     fn checkOk(self: *TypeChecker, ok_expr: *ast.Expr) !types.ResolvedType {
+        // get location from inner expression
+        const loc = ok_expr.getLocation() orelse ast.Location{ .line = 0, .column = 0, .length = 2 };
+
+        // ok requires an enclosing function with an error domain
+        if (self.current_function_error_domain == null) {
+            try self.diagnostics_list.addError(
+                try self.allocator.dupe(u8, "'ok' can only be used in functions with an error clause"),
+                .{
+                    .file = self.source_file,
+                    .line = loc.line,
+                    .column = loc.column,
+                    .length = loc.length,
+                },
+                null,
+            );
+            // still type check the inner expression
+            const inner_typed = try self.checkExpr(ok_expr);
+            defer self.allocator.free(inner_typed.effects);
+            return inner_typed.resolved_type;
+        }
+
         const inner_typed = try self.checkExpr(ok_expr);
         defer self.allocator.free(inner_typed.effects);
-        return inner_typed.resolved_type;
+
+        // return Result<T, E> where T is the inner type
+        const ok_type_ptr = try self.allocator.create(types.ResolvedType);
+        ok_type_ptr.* = inner_typed.resolved_type;
+
+        return types.ResolvedType{
+            .result = .{
+                .ok_type = ok_type_ptr,
+                .error_domain = self.current_function_error_domain.?,
+            },
+        };
     }
 
     fn checkErr(self: *TypeChecker, err_expr: ast.ErrorExpr) !types.ResolvedType {
-        _ = self;
-        _ = err_expr;
-        return types.ResolvedType.unit_type;
+        // err requires an enclosing function with an error domain
+        const domain_name = self.current_function_error_domain orelse {
+            try self.diagnostics_list.addError(
+                try self.allocator.dupe(u8, "'err' can only be used in functions with an error clause"),
+                .{
+                    .file = self.source_file,
+                    .line = 0,
+                    .column = 0,
+                    .length = err_expr.variant.len,
+                },
+                null,
+            );
+            return types.ResolvedType.unit_type;
+        };
+
+        // verify the variant exists in the domain
+        if (self.domains) |domains| {
+            if (domains.get(domain_name)) |domain| {
+                if (domain.findVariant(err_expr.variant) == null) {
+                    try self.diagnostics_list.addError(
+                        try std.fmt.allocPrint(
+                            self.allocator,
+                            "error variant '{s}' does not exist in domain '{s}'",
+                            .{ err_expr.variant, domain_name },
+                        ),
+                        .{
+                            .file = self.source_file,
+                            .line = 0,
+                            .column = 0,
+                            .length = err_expr.variant.len,
+                        },
+                        null,
+                    );
+                }
+            }
+        }
+
+        // type check the field values
+        for (err_expr.fields) |field| {
+            var field_typed = try self.checkExpr(field.value);
+            field_typed.deinit();
+        }
+
+        // return Result<Unit, E> - the ok type is Unit since err doesn't produce a value
+        const ok_type_ptr = try self.allocator.create(types.ResolvedType);
+        ok_type_ptr.* = types.ResolvedType.unit_type;
+
+        return types.ResolvedType{
+            .result = .{
+                .ok_type = ok_type_ptr,
+                .error_domain = domain_name,
+            },
+        };
     }
 
     fn checkCheck(self: *TypeChecker, check_expr: ast.CheckExpr) !types.ResolvedType {
+        // get location from inner expression
+        const loc = check_expr.expr.getLocation() orelse ast.Location{ .line = 0, .column = 0, .length = 5 };
+
+        // check requires an enclosing function with an error domain
+        const current_domain = self.current_function_error_domain orelse {
+            try self.diagnostics_list.addError(
+                try self.allocator.dupe(u8, "'check' can only be used in functions with an error clause"),
+                .{
+                    .file = self.source_file,
+                    .line = loc.line,
+                    .column = loc.column,
+                    .length = loc.length,
+                },
+                null,
+            );
+            // still type check the inner expression
+            const expr_typed = try self.checkExpr(check_expr.expr);
+            defer self.allocator.free(expr_typed.effects);
+            return expr_typed.resolved_type;
+        };
+
         const expr_typed = try self.checkExpr(check_expr.expr);
         defer self.allocator.free(expr_typed.effects);
-        return expr_typed.resolved_type;
+
+        // the expression must return a Result type (checkCall now returns Result for error-domain functions)
+        if (expr_typed.resolved_type != .result) {
+            try self.diagnostics_list.addError(
+                try self.allocator.dupe(u8, "'check' expression must return a Result type"),
+                .{
+                    .file = self.source_file,
+                    .line = loc.line,
+                    .column = loc.column,
+                    .length = loc.length,
+                },
+                null,
+            );
+            return expr_typed.resolved_type;
+        }
+
+        const result_type = expr_typed.resolved_type.result;
+
+        // verify the error domain of the expression is a subset of the current function's domain
+        if (self.domains) |domains| {
+            const expr_domain_name = result_type.error_domain;
+            if (!std.mem.eql(u8, expr_domain_name, current_domain)) {
+                const is_subset = self.isDomainSubset(domains, expr_domain_name, current_domain);
+                if (!is_subset) {
+                    try self.diagnostics_list.addError(
+                        try std.fmt.allocPrint(
+                            self.allocator,
+                            "error domain '{s}' is not compatible with function's error domain '{s}'",
+                            .{ expr_domain_name, current_domain },
+                        ),
+                        .{
+                            .file = self.source_file,
+                            .line = loc.line,
+                            .column = loc.column,
+                            .length = loc.length,
+                        },
+                        null,
+                    );
+                }
+            }
+        }
+
+        // type check context frame fields if present
+        if (check_expr.context_frame) |frame| {
+            for (frame) |field| {
+                var field_typed = try self.checkExpr(field.value);
+                field_typed.deinit();
+            }
+        }
+
+        // return the unwrapped ok type
+        // types are arena-managed, return directly
+        return result_type.ok_type.*;
     }
 
     fn checkEnsure(self: *TypeChecker, ensure_expr: ast.EnsureExpr) !types.ResolvedType {
-        const condition_typed = try self.checkExpr(ensure_expr.condition);
-        defer {
-            condition_typed.resolved_type.deinit(self.allocator);
-            self.allocator.free(condition_typed.effects);
-        }
+        // get location from condition expression
+        const loc = ensure_expr.condition.getLocation() orelse ast.Location{ .line = 0, .column = 0, .length = 6 };
+
+        // ensure requires an enclosing function with an error domain
+        const domain_name = self.current_function_error_domain orelse {
+            try self.diagnostics_list.addError(
+                try self.allocator.dupe(u8, "'ensure' can only be used in functions with an error clause"),
+                .{
+                    .file = self.source_file,
+                    .line = loc.line,
+                    .column = loc.column,
+                    .length = loc.length,
+                },
+                null,
+            );
+            // still type check the condition
+            var condition_typed = try self.checkExpr(ensure_expr.condition);
+            condition_typed.deinit();
+            return types.ResolvedType.unit_type;
+        };
+
+        var condition_typed = try self.checkExpr(ensure_expr.condition);
+        defer condition_typed.deinit();
+
         if (condition_typed.resolved_type != .bool_type) {
             try self.diagnostics_list.addError(
                 try self.allocator.dupe(u8, "ensure condition must be Bool"),
                 .{
                     .file = self.source_file,
-                    .line = 0,
-                    .column = 0,
-                    .length = 0,
+                    .line = loc.line,
+                    .column = loc.column,
+                    .length = loc.length,
                 },
                 null,
             );
         }
+
+        // verify the error variant exists in the domain
+        if (self.domains) |domains| {
+            if (domains.get(domain_name)) |domain| {
+                if (domain.findVariant(ensure_expr.error_expr.variant) == null) {
+                    try self.diagnostics_list.addError(
+                        try std.fmt.allocPrint(
+                            self.allocator,
+                            "error variant '{s}' does not exist in domain '{s}'",
+                            .{ ensure_expr.error_expr.variant, domain_name },
+                        ),
+                        .{
+                            .file = self.source_file,
+                            .line = loc.line,
+                            .column = loc.column,
+                            .length = ensure_expr.error_expr.variant.len,
+                        },
+                        null,
+                    );
+                }
+            }
+        }
+
+        // type check the error field values
+        for (ensure_expr.error_expr.fields) |field| {
+            var field_typed = try self.checkExpr(field.value);
+            field_typed.deinit();
+        }
+
+        // ensure returns Unit on success (the error path returns from function)
         return types.ResolvedType.unit_type;
+    }
+
+    /// check if domain_a is a subset of domain_b (all variants in a exist in b)
+    fn isDomainSubset(self: *TypeChecker, domains: *error_domains.ErrorDomainTable, domain_a: []const u8, domain_b: []const u8) bool {
+        _ = self;
+        const a = domains.get(domain_a) orelse return false;
+        const b = domains.get(domain_b) orelse return false;
+
+        // every variant in a must exist in b
+        for (a.variants) |variant_a| {
+            var found = false;
+            for (b.variants) |variant_b| {
+                if (std.mem.eql(u8, variant_a.name, variant_b.name)) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                return false;
+            }
+        }
+        return true;
     }
 
     fn checkMatchExpr(self: *TypeChecker, match_expr: ast.MatchExpr) !types.ResolvedType {
         const value_typed = try self.checkExpr(match_expr.value);
         defer {
-            value_typed.resolved_type.deinit(self.allocator);
             self.allocator.free(value_typed.effects);
         }
 
+        // types are arena-managed, no clone needed
+        const match_type = value_typed.resolved_type;
+
         var result_type: ?types.ResolvedType = null;
         for (match_expr.arms) |arm| {
-            const arm_typed = try self.checkExpr(arm.body);
+            // validate pattern against the matched value type
+            try self.checkPattern(arm.pattern, match_type);
+
+            // create a new scope for each arm to bind pattern variables
+            var arm_scope = self.createScope(self.current_scope, self.current_scope.scope_level + 1);
+            defer arm_scope.deinit();
+
+            const prev_scope = self.current_scope;
+            defer self.current_scope = prev_scope;
+            self.current_scope = &arm_scope;
+
+            // bind pattern variables to the arm scope
+            try self.bindPatternVariables(arm.pattern, match_type);
+
+            var arm_typed = try self.checkExpr(arm.body);
             if (result_type) |rt| {
-                defer {
-                    arm_typed.resolved_type.deinit(self.allocator);
-                    self.allocator.free(arm_typed.effects);
-                }
+                defer arm_typed.deinit();
                 if (!rt.eql(&arm_typed.resolved_type)) {
                     try self.diagnostics_list.addError(
                         try self.allocator.dupe(u8, "match arms must have the same type"),
@@ -1365,17 +2403,12 @@ pub const TypeChecker = struct {
         }
 
         const first_elem_typed = try self.checkExpr(array_literal.elements[0]);
-        defer {
-            self.allocator.free(first_elem_typed.effects);
-        }
+        defer self.allocator.free(first_elem_typed.effects);
         const element_type = first_elem_typed.resolved_type;
 
         for (array_literal.elements[1..]) |elem| {
-            const elem_typed = try self.checkExpr(elem);
-            defer {
-                elem_typed.resolved_type.deinit(self.allocator);
-                self.allocator.free(elem_typed.effects);
-            }
+            var elem_typed = try self.checkExpr(elem);
+            defer elem_typed.deinit();
             if (!elem_typed.resolved_type.eql(&element_type)) {
                 const expected_str = try element_type.toStr(self.allocator);
                 defer self.allocator.free(expected_str);
@@ -1399,14 +2432,15 @@ pub const TypeChecker = struct {
         }
 
         const elem_type_ptr = try self.allocator.create(types.ResolvedType);
-        elem_type_ptr.* = try element_type.clone(self.allocator);
+        elem_type_ptr.* = element_type;
 
-        return types.ResolvedType{
+        // intern the type for arena management
+        return try self.internType(types.ResolvedType{
             .array = .{
                 .element_type = elem_type_ptr,
                 .size = array_literal.elements.len,
             },
-        };
+        });
     }
 
     fn isNumericLiteral(self: *TypeChecker, expr: *ast.Expr) bool {

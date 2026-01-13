@@ -160,11 +160,10 @@ type Maybe<T> = | Some { value: T } | None;
 
 **Sugar:**
 - `T?` is equivalent to `Maybe<T>`
-- `null` literal is equivalent to `None`
 
 ```ferrule
 const x: u32? = Some { value: 42 };
-const y: u32? = None;  // or: = null;
+const y: u32? = None;
 ```
 
 There is **no optional chaining**. Handle `T?` via `match` or explicit comparisons.

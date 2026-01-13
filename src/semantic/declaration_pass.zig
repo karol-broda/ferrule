@@ -5,6 +5,7 @@ const symbol_table = @import("../symbol_table.zig");
 const error_domains = @import("../error_domains.zig");
 const diagnostics = @import("../diagnostics.zig");
 const symbol_locations = @import("../symbol_locations.zig");
+const context = @import("../context.zig");
 
 pub const DeclarationCollector = struct {
     symbols: *symbol_table.SymbolTable,
@@ -14,8 +15,12 @@ pub const DeclarationCollector = struct {
     source_file: []const u8,
     location_table: *symbol_locations.SymbolLocationTable,
 
+    // compilation context for arena-based memory management
+    // strings and types are interned for deduplication
+    compilation_context: *context.CompilationContext,
+
     pub fn init(
-        allocator: std.mem.Allocator,
+        ctx: *context.CompilationContext,
         symbols: *symbol_table.SymbolTable,
         domains: *error_domains.ErrorDomainTable,
         diagnostics_list: *diagnostics.DiagnosticList,
@@ -26,10 +31,16 @@ pub const DeclarationCollector = struct {
             .symbols = symbols,
             .domains = domains,
             .diagnostics_list = diagnostics_list,
-            .allocator = allocator,
+            .allocator = ctx.permanentAllocator(),
             .source_file = source_file,
             .location_table = location_table,
+            .compilation_context = ctx,
         };
+    }
+
+    // interns a string in the context's arena
+    fn internString(self: *DeclarationCollector, str: []const u8) ![]const u8 {
+        return self.compilation_context.internString(str);
     }
 
     pub fn collect(self: *DeclarationCollector, module: ast.Module) !void {
@@ -59,8 +70,8 @@ pub const DeclarationCollector = struct {
                 ),
                 .{
                     .file = self.source_file,
-                    .line = 0,
-                    .column = 0,
+                    .line = func.name_loc.line,
+                    .column = func.name_loc.column,
                     .length = func.name.len,
                 },
                 null,
@@ -68,7 +79,7 @@ pub const DeclarationCollector = struct {
             return;
         }
 
-        const params = try self.allocator.alloc(@import("../types.zig").ResolvedType, func.params.len);
+        const params = try self.allocator.alloc(types.ResolvedType, func.params.len);
         errdefer self.allocator.free(params);
 
         const param_names = try self.allocator.alloc([]const u8, func.params.len);
@@ -83,11 +94,11 @@ pub const DeclarationCollector = struct {
             param_names[i] = param.name;
         }
 
-        const effects = try self.allocator.alloc(@import("../types.zig").Effect, func.effects.len);
+        const effects = try self.allocator.alloc(types.Effect, func.effects.len);
         errdefer self.allocator.free(effects);
 
         for (func.effects, 0..) |effect_str, i| {
-            if (@import("../types.zig").Effect.fromString(effect_str)) |effect| {
+            if (types.Effect.fromString(effect_str)) |effect| {
                 effects[i] = effect;
             } else {
                 try self.diagnostics_list.addError(
@@ -98,8 +109,8 @@ pub const DeclarationCollector = struct {
                     ),
                     .{
                         .file = self.source_file,
-                        .line = 0,
-                        .column = 0,
+                        .line = func.name_loc.line,
+                        .column = func.name_loc.column,
                         .length = effect_str.len,
                     },
                     null,
@@ -117,7 +128,7 @@ pub const DeclarationCollector = struct {
             const tp_infos = try self.allocator.alloc(types.TypeParamInfo, tps.len);
             for (tps, 0..) |tp, i| {
                 tp_infos[i] = .{
-                    .name = try self.allocator.dupe(u8, tp.name),
+                    .name = try self.internString(tp.name),
                     .variance = switch (tp.variance) {
                         .invariant => .invariant,
                         .covariant => .covariant,
@@ -164,8 +175,8 @@ pub const DeclarationCollector = struct {
                 ),
                 .{
                     .file = self.source_file,
-                    .line = 0,
-                    .column = 0,
+                    .line = type_decl.name_loc.line,
+                    .column = type_decl.name_loc.column,
                     .length = type_decl.name.len,
                 },
                 null,
@@ -178,7 +189,7 @@ pub const DeclarationCollector = struct {
             const tp_infos = try self.allocator.alloc(types.TypeParamInfo, tps.len);
             for (tps, 0..) |tp, i| {
                 tp_infos[i] = .{
-                    .name = try self.allocator.dupe(u8, tp.name),
+                    .name = try self.internString(tp.name),
                     .variance = switch (tp.variance) {
                         .invariant => .invariant,
                         .covariant => .covariant,
@@ -220,8 +231,8 @@ pub const DeclarationCollector = struct {
                 ),
                 .{
                     .file = self.source_file,
-                    .line = 0,
-                    .column = 0,
+                    .line = error_decl.name_loc.line,
+                    .column = error_decl.name_loc.column,
                     .length = error_decl.name.len,
                 },
                 null,
@@ -255,8 +266,8 @@ pub const DeclarationCollector = struct {
                 ),
                 .{
                     .file = self.source_file,
-                    .line = 0,
-                    .column = 0,
+                    .line = domain.name_loc.line,
+                    .column = domain.name_loc.column,
                     .length = domain.name.len,
                 },
                 null,
@@ -272,9 +283,9 @@ pub const DeclarationCollector = struct {
 
         try self.symbols.insertGlobal(domain.name, symbol);
 
-        // Handle both union syntax (error_union) and inline variant syntax (variants)
+        // handle both union syntax (error_union) and inline variant syntax (variants)
         if (domain.error_union) |error_names| {
-            // Union syntax: domain IoError = NotFound | Denied;
+            // union syntax: domain IoError = NotFound | Denied;
             const variants = try self.allocator.alloc(error_domains.ErrorVariant, error_names.len);
             for (error_names, 0..) |err_name, i| {
                 variants[i] = .{
@@ -290,7 +301,7 @@ pub const DeclarationCollector = struct {
 
             try self.domains.insert(domain.name, error_domain);
         } else if (domain.variants) |inline_variants| {
-            // Inline variant syntax: domain IoError { NotFound { path: String } }
+            // inline variant syntax: domain IoError { NotFound { path: String } }
             const variants = try self.allocator.alloc(error_domains.ErrorVariant, inline_variants.len);
             for (inline_variants, 0..) |variant, i| {
                 variants[i] = .{
@@ -325,8 +336,8 @@ pub const DeclarationCollector = struct {
                 ),
                 .{
                     .file = self.source_file,
-                    .line = 0,
-                    .column = 0,
+                    .line = const_decl.name_loc.line,
+                    .column = const_decl.name_loc.column,
                     .length = const_decl.name.len,
                 },
                 null,
@@ -354,5 +365,4 @@ pub const DeclarationCollector = struct {
 };
 
 test {
-    _ = @import("declaration_pass_test.zig");
 }

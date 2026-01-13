@@ -2,6 +2,7 @@ const std = @import("std");
 const ast = @import("ast.zig");
 const symbol_table = @import("symbol_table.zig");
 const LLVMBackend = @import("codegen/llvm_backend.zig").LLVMBackend;
+const context = @import("context.zig");
 
 pub const CodegenResult = struct {
     llvm_ir: []const u8,
@@ -13,14 +14,15 @@ pub const CodegenResult = struct {
 };
 
 pub fn generateLLVMIR(
-    allocator: std.mem.Allocator,
+    ctx: *context.CompilationContext,
     module: ast.Module,
     symbols: *symbol_table.SymbolTable,
     diagnostics_list: *@import("diagnostics.zig").DiagnosticList,
     source_file: []const u8,
     module_name: []const u8,
 ) !CodegenResult {
-    var backend = try LLVMBackend.init(allocator, module_name, symbols, diagnostics_list, source_file);
+    const allocator = ctx.permanentAllocator();
+    var backend = try LLVMBackend.init(ctx, module_name, symbols, diagnostics_list, source_file);
     defer backend.deinit();
 
     try backend.generateModule(module);
@@ -34,7 +36,7 @@ pub fn generateLLVMIR(
 }
 
 pub fn generateFiles(
-    allocator: std.mem.Allocator,
+    ctx: *context.CompilationContext,
     module: ast.Module,
     symbols: *symbol_table.SymbolTable,
     diagnostics_list: *@import("diagnostics.zig").DiagnosticList,
@@ -42,7 +44,8 @@ pub fn generateFiles(
     module_name: []const u8,
     output_base: []const u8,
 ) !void {
-    var backend = try LLVMBackend.init(allocator, module_name, symbols, diagnostics_list, source_file);
+    const allocator = ctx.permanentAllocator();
+    var backend = try LLVMBackend.init(ctx, module_name, symbols, diagnostics_list, source_file);
     defer backend.deinit();
 
     try backend.generateModule(module);

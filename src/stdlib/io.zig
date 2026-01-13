@@ -122,7 +122,7 @@ pub const stdin = struct {
                     if (buffer.items.len == 0) {
                         return null; // EOF with no data
                     }
-                    break; // Return what we have
+                    break; // return accumulated data
                 }
                 return mapError(err);
             };

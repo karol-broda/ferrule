@@ -46,6 +46,8 @@ extern fn LLVMConstInt(ty: *TypeRef, val: c_ulonglong, sign_extend: c_int) *Valu
 extern fn LLVMConstReal(ty: *TypeRef, val: f64) *ValueRef;
 extern fn LLVMConstStringInContext(ctx: *ContextRef, str: [*]const u8, len: c_uint, dont_null_terminate: c_int) *ValueRef;
 extern fn LLVMConstStructInContext(ctx: *ContextRef, vals: [*]const *ValueRef, count: c_uint, is_packed: c_int) *ValueRef;
+extern fn LLVMGetUndef(ty: *TypeRef) *ValueRef;
+extern fn LLVMTypeOf(val: *ValueRef) *TypeRef;
 
 // instructions
 extern fn LLVMBuildRet(builder: *BuilderRef, val: *ValueRef) *ValueRef;
@@ -72,6 +74,9 @@ extern fn LLVMBuildICmp(builder: *BuilderRef, op: IntPredicate, lhs: *ValueRef, 
 extern fn LLVMBuildFCmp(builder: *BuilderRef, op: RealPredicate, lhs: *ValueRef, rhs: *ValueRef, name: [*:0]const u8) *ValueRef;
 extern fn LLVMBuildBr(builder: *BuilderRef, dest: *BasicBlockRef) *ValueRef;
 extern fn LLVMBuildCondBr(builder: *BuilderRef, cond: *ValueRef, then_block: *BasicBlockRef, else_block: *BasicBlockRef) *ValueRef;
+extern fn LLVMBuildSwitch(builder: *BuilderRef, v: *ValueRef, else_block: *BasicBlockRef, num_cases: c_uint) *ValueRef;
+extern fn LLVMAddCase(switch_inst: *ValueRef, on_val: *ValueRef, dest: *BasicBlockRef) void;
+extern fn LLVMBuildUnreachable(builder: *BuilderRef) *ValueRef;
 extern fn LLVMGetInsertBlock(builder: *BuilderRef) *BasicBlockRef;
 extern fn LLVMBuildPhi(builder: *BuilderRef, ty: *TypeRef, name: [*:0]const u8) *ValueRef;
 extern fn LLVMAddIncoming(phi: *ValueRef, incoming_values: [*]const *ValueRef, incoming_blocks: [*]const *BasicBlockRef, count: c_uint) void;
@@ -253,6 +258,14 @@ pub fn constStruct(ctx: *ContextRef, vals: [*]const *ValueRef, count: c_uint, is
     return LLVMConstStructInContext(ctx, vals, count, is_packed);
 }
 
+pub fn getUndef(ty: *TypeRef) *ValueRef {
+    return LLVMGetUndef(ty);
+}
+
+pub fn typeOf(val: *ValueRef) *TypeRef {
+    return LLVMTypeOf(val);
+}
+
 // instruction helpers
 pub fn buildRet(builder: *BuilderRef, val: *ValueRef) *ValueRef {
     return LLVMBuildRet(builder, val);
@@ -350,6 +363,18 @@ pub fn buildCondBr(builder: *BuilderRef, cond: *ValueRef, then_block: *BasicBloc
     return LLVMBuildCondBr(builder, cond, then_block, else_block);
 }
 
+pub fn buildSwitch(builder: *BuilderRef, v: *ValueRef, else_block: *BasicBlockRef, num_cases: c_uint) *ValueRef {
+    return LLVMBuildSwitch(builder, v, else_block, num_cases);
+}
+
+pub fn addCase(switch_inst: *ValueRef, on_val: *ValueRef, dest: *BasicBlockRef) void {
+    LLVMAddCase(switch_inst, on_val, dest);
+}
+
+pub fn buildUnreachable(builder: *BuilderRef) *ValueRef {
+    return LLVMBuildUnreachable(builder);
+}
+
 pub fn getInsertBlock(builder: *BuilderRef) *BasicBlockRef {
     return LLVMGetInsertBlock(builder);
 }
@@ -384,6 +409,62 @@ pub fn setInitializer(global: *ValueRef, constant_val: *ValueRef) void {
 
 pub fn setGlobalConstant(global: *ValueRef, is_constant: c_int) void {
     LLVMSetGlobalConstant(global, is_constant);
+}
+
+// type introspection
+pub const TypeKind = enum(c_uint) {
+    void = 0,
+    half = 1,
+    float = 2,
+    double = 3,
+    x86_fp80 = 4,
+    fp128 = 5,
+    ppc_fp128 = 6,
+    label = 7,
+    integer = 8,
+    function = 9,
+    struct_type = 10,
+    array = 11,
+    pointer = 12,
+    vector = 13,
+    metadata = 14,
+    x86_mmx = 15,
+    token = 16,
+    scalable_vector = 17,
+    bfloat = 18,
+    x86_amx = 19,
+    target_ext = 20,
+};
+
+extern fn LLVMGetTypeKind(ty: *TypeRef) TypeKind;
+pub fn getTypeKind(ty: *TypeRef) TypeKind {
+    return LLVMGetTypeKind(ty);
+}
+
+extern fn LLVMGetIntTypeWidth(ty: *TypeRef) c_uint;
+pub fn getIntTypeWidth(ty: *TypeRef) c_uint {
+    return LLVMGetIntTypeWidth(ty);
+}
+
+// cast instructions
+extern fn LLVMBuildSExt(builder: *BuilderRef, val: *ValueRef, dest_ty: *TypeRef, name: [*:0]const u8) *ValueRef;
+pub fn buildSExt(builder: *BuilderRef, val: *ValueRef, dest_ty: *TypeRef, name: [*:0]const u8) *ValueRef {
+    return LLVMBuildSExt(builder, val, dest_ty, name);
+}
+
+extern fn LLVMBuildZExt(builder: *BuilderRef, val: *ValueRef, dest_ty: *TypeRef, name: [*:0]const u8) *ValueRef;
+pub fn buildZExt(builder: *BuilderRef, val: *ValueRef, dest_ty: *TypeRef, name: [*:0]const u8) *ValueRef {
+    return LLVMBuildZExt(builder, val, dest_ty, name);
+}
+
+extern fn LLVMBuildTrunc(builder: *BuilderRef, val: *ValueRef, dest_ty: *TypeRef, name: [*:0]const u8) *ValueRef;
+pub fn buildTrunc(builder: *BuilderRef, val: *ValueRef, dest_ty: *TypeRef, name: [*:0]const u8) *ValueRef {
+    return LLVMBuildTrunc(builder, val, dest_ty, name);
+}
+
+extern fn LLVMBuildBitCast(builder: *BuilderRef, val: *ValueRef, dest_ty: *TypeRef, name: [*:0]const u8) *ValueRef;
+pub fn buildBitCast(builder: *BuilderRef, val: *ValueRef, dest_ty: *TypeRef, name: [*:0]const u8) *ValueRef {
+    return LLVMBuildBitCast(builder, val, dest_ty, name);
 }
 
 // file output

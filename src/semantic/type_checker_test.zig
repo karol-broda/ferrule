@@ -6,24 +6,27 @@ const diagnostics = @import("../diagnostics.zig");
 const types = @import("../types.zig");
 const hover_info = @import("../hover_info.zig");
 const symbol_locations = @import("../symbol_locations.zig");
+const context = @import("../context.zig");
 
 test "check simple number literal" {
     const allocator = std.testing.allocator;
 
-    var symbols = symbol_table.SymbolTable.init(allocator);
+    var ctx = context.CompilationContext.init(allocator);
+    defer ctx.deinit();
+
+    var symbols = symbol_table.SymbolTable.init(&ctx);
     defer symbols.deinit();
 
-    var diag_list = diagnostics.DiagnosticList.init(allocator);
-    defer diag_list.deinit();
+    var diag_list = diagnostics.DiagnosticList.init(ctx.permanentAllocator());
 
-    var hover_table = hover_info.HoverInfoTable.init(allocator);
+    var hover_table = hover_info.HoverInfoTable.init(&ctx);
     defer hover_table.deinit();
 
-    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
+    var location_table = symbol_locations.SymbolLocationTable.init(&ctx);
     defer location_table.deinit();
 
     var checker = type_checker.TypeChecker.init(
-        allocator,
+        &ctx,
         &symbols,
         &diag_list,
         "test.fe",
@@ -40,20 +43,22 @@ test "check simple number literal" {
 test "check float literal" {
     const allocator = std.testing.allocator;
 
-    var symbols = symbol_table.SymbolTable.init(allocator);
+    var ctx = context.CompilationContext.init(allocator);
+    defer ctx.deinit();
+
+    var symbols = symbol_table.SymbolTable.init(&ctx);
     defer symbols.deinit();
 
-    var diag_list = diagnostics.DiagnosticList.init(allocator);
-    defer diag_list.deinit();
+    var diag_list = diagnostics.DiagnosticList.init(ctx.permanentAllocator());
 
-    var hover_table = hover_info.HoverInfoTable.init(allocator);
+    var hover_table = hover_info.HoverInfoTable.init(&ctx);
     defer hover_table.deinit();
 
-    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
+    var location_table = symbol_locations.SymbolLocationTable.init(&ctx);
     defer location_table.deinit();
 
     var checker = type_checker.TypeChecker.init(
-        allocator,
+        &ctx,
         &symbols,
         &diag_list,
         "test.fe",
@@ -70,20 +75,22 @@ test "check float literal" {
 test "check string literal" {
     const allocator = std.testing.allocator;
 
-    var symbols = symbol_table.SymbolTable.init(allocator);
+    var ctx = context.CompilationContext.init(allocator);
+    defer ctx.deinit();
+
+    var symbols = symbol_table.SymbolTable.init(&ctx);
     defer symbols.deinit();
 
-    var diag_list = diagnostics.DiagnosticList.init(allocator);
-    defer diag_list.deinit();
+    var diag_list = diagnostics.DiagnosticList.init(ctx.permanentAllocator());
 
-    var hover_table = hover_info.HoverInfoTable.init(allocator);
+    var hover_table = hover_info.HoverInfoTable.init(&ctx);
     defer hover_table.deinit();
 
-    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
+    var location_table = symbol_locations.SymbolLocationTable.init(&ctx);
     defer location_table.deinit();
 
     var checker = type_checker.TypeChecker.init(
-        allocator,
+        &ctx,
         &symbols,
         &diag_list,
         "test.fe",
@@ -100,20 +107,22 @@ test "check string literal" {
 test "check bool literal" {
     const allocator = std.testing.allocator;
 
-    var symbols = symbol_table.SymbolTable.init(allocator);
+    var ctx = context.CompilationContext.init(allocator);
+    defer ctx.deinit();
+
+    var symbols = symbol_table.SymbolTable.init(&ctx);
     defer symbols.deinit();
 
-    var diag_list = diagnostics.DiagnosticList.init(allocator);
-    defer diag_list.deinit();
+    var diag_list = diagnostics.DiagnosticList.init(ctx.permanentAllocator());
 
-    var hover_table = hover_info.HoverInfoTable.init(allocator);
+    var hover_table = hover_info.HoverInfoTable.init(&ctx);
     defer hover_table.deinit();
 
-    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
+    var location_table = symbol_locations.SymbolLocationTable.init(&ctx);
     defer location_table.deinit();
 
     var checker = type_checker.TypeChecker.init(
-        allocator,
+        &ctx,
         &symbols,
         &diag_list,
         "test.fe",
@@ -130,20 +139,22 @@ test "check bool literal" {
 test "check undefined identifier should error" {
     const allocator = std.testing.allocator;
 
-    var symbols = symbol_table.SymbolTable.init(allocator);
+    var ctx = context.CompilationContext.init(allocator);
+    defer ctx.deinit();
+
+    var symbols = symbol_table.SymbolTable.init(&ctx);
     defer symbols.deinit();
 
-    var diag_list = diagnostics.DiagnosticList.init(allocator);
-    defer diag_list.deinit();
+    var diag_list = diagnostics.DiagnosticList.init(ctx.permanentAllocator());
 
-    var hover_table = hover_info.HoverInfoTable.init(allocator);
+    var hover_table = hover_info.HoverInfoTable.init(&ctx);
     defer hover_table.deinit();
 
-    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
+    var location_table = symbol_locations.SymbolLocationTable.init(&ctx);
     defer location_table.deinit();
 
     var checker = type_checker.TypeChecker.init(
-        allocator,
+        &ctx,
         &symbols,
         &diag_list,
         "test.fe",
@@ -151,29 +162,34 @@ test "check undefined identifier should error" {
         &location_table,
     );
 
-    var expr = ast.Expr{ .identifier = .{ .name = "undefined_var", .loc = .{ .line = 1, .column = 1 } } };
-    _ = try checker.checkExpr(&expr);
+    var expr = ast.Expr{ .identifier = .{ .name = "undefined_var", .loc = .{ .line = 1, .column = 1, .length = 13 } } };
+    const typed = try checker.checkExpr(&expr);
 
+    // should return unit type for undefined identifier
+    try std.testing.expectEqual(types.ResolvedType.unit_type, typed.resolved_type);
+    // should have added an error
     try std.testing.expect(diag_list.hasErrors());
 }
 
 test "check variable declaration with matching types" {
     const allocator = std.testing.allocator;
 
-    var symbols = symbol_table.SymbolTable.init(allocator);
+    var ctx = context.CompilationContext.init(allocator);
+    defer ctx.deinit();
+
+    var symbols = symbol_table.SymbolTable.init(&ctx);
     defer symbols.deinit();
 
-    var diag_list = diagnostics.DiagnosticList.init(allocator);
-    defer diag_list.deinit();
+    var diag_list = diagnostics.DiagnosticList.init(ctx.permanentAllocator());
 
-    var hover_table = hover_info.HoverInfoTable.init(allocator);
+    var hover_table = hover_info.HoverInfoTable.init(&ctx);
     defer hover_table.deinit();
 
-    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
+    var location_table = symbol_locations.SymbolLocationTable.init(&ctx);
     defer location_table.deinit();
 
     var checker = type_checker.TypeChecker.init(
-        allocator,
+        &ctx,
         &symbols,
         &diag_list,
         "test.fe",
@@ -181,37 +197,39 @@ test "check variable declaration with matching types" {
         &location_table,
     );
 
-    var value = ast.Expr{ .number = "42" };
-
+    var value_expr = ast.Expr{ .number = "42" };
     const var_decl = ast.VarDecl{
         .name = "x",
-        .type_annotation = .{ .simple = .{ .name = "i32", .loc = .{ .line = 1, .column = 1 } } },
-        .value = &value,
-        .name_loc = .{ .line = 1, .column = 1 },
+        .name_loc = .{ .line = 1, .column = 5, .length = 1 },
+        .type_annotation = .{ .simple = .{ .name = "i32", .loc = .{ .line = 1, .column = 8, .length = 3 } } },
+        .value = &value_expr,
     };
 
     try checker.checkVarDecl(var_decl);
 
+    // should not have any errors
     try std.testing.expect(!diag_list.hasErrors());
 }
 
 test "check binary addition of same types" {
     const allocator = std.testing.allocator;
 
-    var symbols = symbol_table.SymbolTable.init(allocator);
+    var ctx = context.CompilationContext.init(allocator);
+    defer ctx.deinit();
+
+    var symbols = symbol_table.SymbolTable.init(&ctx);
     defer symbols.deinit();
 
-    var diag_list = diagnostics.DiagnosticList.init(allocator);
-    defer diag_list.deinit();
+    var diag_list = diagnostics.DiagnosticList.init(ctx.permanentAllocator());
 
-    var hover_table = hover_info.HoverInfoTable.init(allocator);
+    var hover_table = hover_info.HoverInfoTable.init(&ctx);
     defer hover_table.deinit();
 
-    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
+    var location_table = symbol_locations.SymbolLocationTable.init(&ctx);
     defer location_table.deinit();
 
     var checker = type_checker.TypeChecker.init(
-        allocator,
+        &ctx,
         &symbols,
         &diag_list,
         "test.fe",
@@ -221,14 +239,11 @@ test "check binary addition of same types" {
 
     var left = ast.Expr{ .number = "1" };
     var right = ast.Expr{ .number = "2" };
-    var expr = ast.Expr{
-        .binary = .{
-            .left = &left,
-            .op = .add,
-            .right = &right,
-        },
-    };
-
+    var expr = ast.Expr{ .binary = .{
+        .left = &left,
+        .right = &right,
+        .op = .add,
+    } };
     const typed = try checker.checkExpr(&expr);
 
     try std.testing.expectEqual(types.ResolvedType.i32, typed.resolved_type);
@@ -238,20 +253,22 @@ test "check binary addition of same types" {
 test "check binary comparison returns bool" {
     const allocator = std.testing.allocator;
 
-    var symbols = symbol_table.SymbolTable.init(allocator);
+    var ctx = context.CompilationContext.init(allocator);
+    defer ctx.deinit();
+
+    var symbols = symbol_table.SymbolTable.init(&ctx);
     defer symbols.deinit();
 
-    var diag_list = diagnostics.DiagnosticList.init(allocator);
-    defer diag_list.deinit();
+    var diag_list = diagnostics.DiagnosticList.init(ctx.permanentAllocator());
 
-    var hover_table = hover_info.HoverInfoTable.init(allocator);
+    var hover_table = hover_info.HoverInfoTable.init(&ctx);
     defer hover_table.deinit();
 
-    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
+    var location_table = symbol_locations.SymbolLocationTable.init(&ctx);
     defer location_table.deinit();
 
     var checker = type_checker.TypeChecker.init(
-        allocator,
+        &ctx,
         &symbols,
         &diag_list,
         "test.fe",
@@ -261,36 +278,36 @@ test "check binary comparison returns bool" {
 
     var left = ast.Expr{ .number = "1" };
     var right = ast.Expr{ .number = "2" };
-    var expr = ast.Expr{
-        .binary = .{
-            .left = &left,
-            .op = .lt,
-            .right = &right,
-        },
-    };
-
+    var expr = ast.Expr{ .binary = .{
+        .left = &left,
+        .right = &right,
+        .op = .lt,
+    } };
     const typed = try checker.checkExpr(&expr);
 
     try std.testing.expectEqual(types.ResolvedType.bool_type, typed.resolved_type);
+    try std.testing.expect(!diag_list.hasErrors());
 }
 
 test "check logical operators require bool operands" {
     const allocator = std.testing.allocator;
 
-    var symbols = symbol_table.SymbolTable.init(allocator);
+    var ctx = context.CompilationContext.init(allocator);
+    defer ctx.deinit();
+
+    var symbols = symbol_table.SymbolTable.init(&ctx);
     defer symbols.deinit();
 
-    var diag_list = diagnostics.DiagnosticList.init(allocator);
-    defer diag_list.deinit();
+    var diag_list = diagnostics.DiagnosticList.init(ctx.permanentAllocator());
 
-    var hover_table = hover_info.HoverInfoTable.init(allocator);
+    var hover_table = hover_info.HoverInfoTable.init(&ctx);
     defer hover_table.deinit();
 
-    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
+    var location_table = symbol_locations.SymbolLocationTable.init(&ctx);
     defer location_table.deinit();
 
     var checker = type_checker.TypeChecker.init(
-        allocator,
+        &ctx,
         &symbols,
         &diag_list,
         "test.fe",
@@ -298,38 +315,41 @@ test "check logical operators require bool operands" {
         &location_table,
     );
 
+    // using numbers instead of bools should error
     var left = ast.Expr{ .number = "1" };
     var right = ast.Expr{ .number = "2" };
-    var expr = ast.Expr{
-        .binary = .{
-            .left = &left,
-            .op = .logical_and,
-            .right = &right,
-        },
-    };
+    var expr = ast.Expr{ .binary = .{
+        .left = &left,
+        .right = &right,
+        .op = .logical_and,
+    } };
+    const typed = try checker.checkExpr(&expr);
 
-    _ = try checker.checkExpr(&expr);
-
+    // should still return bool (the expected type)
+    try std.testing.expectEqual(types.ResolvedType.bool_type, typed.resolved_type);
+    // but should have an error
     try std.testing.expect(diag_list.hasErrors());
 }
 
 test "check if statement with non-bool condition should error" {
     const allocator = std.testing.allocator;
 
-    var symbols = symbol_table.SymbolTable.init(allocator);
+    var ctx = context.CompilationContext.init(allocator);
+    defer ctx.deinit();
+
+    var symbols = symbol_table.SymbolTable.init(&ctx);
     defer symbols.deinit();
 
-    var diag_list = diagnostics.DiagnosticList.init(allocator);
-    defer diag_list.deinit();
+    var diag_list = diagnostics.DiagnosticList.init(ctx.permanentAllocator());
 
-    var hover_table = hover_info.HoverInfoTable.init(allocator);
+    var hover_table = hover_info.HoverInfoTable.init(&ctx);
     defer hover_table.deinit();
 
-    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
+    var location_table = symbol_locations.SymbolLocationTable.init(&ctx);
     defer location_table.deinit();
 
     var checker = type_checker.TypeChecker.init(
-        allocator,
+        &ctx,
         &symbols,
         &diag_list,
         "test.fe",
@@ -338,7 +358,6 @@ test "check if statement with non-bool condition should error" {
     );
 
     var condition = ast.Expr{ .number = "42" };
-
     const if_stmt = ast.IfStmt{
         .condition = &condition,
         .then_block = &[_]ast.Stmt{},
@@ -353,20 +372,22 @@ test "check if statement with non-bool condition should error" {
 test "check while statement with non-bool condition should error" {
     const allocator = std.testing.allocator;
 
-    var symbols = symbol_table.SymbolTable.init(allocator);
+    var ctx = context.CompilationContext.init(allocator);
+    defer ctx.deinit();
+
+    var symbols = symbol_table.SymbolTable.init(&ctx);
     defer symbols.deinit();
 
-    var diag_list = diagnostics.DiagnosticList.init(allocator);
-    defer diag_list.deinit();
+    var diag_list = diagnostics.DiagnosticList.init(ctx.permanentAllocator());
 
-    var hover_table = hover_info.HoverInfoTable.init(allocator);
+    var hover_table = hover_info.HoverInfoTable.init(&ctx);
     defer hover_table.deinit();
 
-    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
+    var location_table = symbol_locations.SymbolLocationTable.init(&ctx);
     defer location_table.deinit();
 
     var checker = type_checker.TypeChecker.init(
-        allocator,
+        &ctx,
         &symbols,
         &diag_list,
         "test.fe",
@@ -374,8 +395,7 @@ test "check while statement with non-bool condition should error" {
         &location_table,
     );
 
-    var condition = ast.Expr{ .string = "not bool" };
-
+    var condition = ast.Expr{ .number = "42" };
     const while_stmt = ast.WhileStmt{
         .condition = &condition,
         .body = &[_]ast.Stmt{},
@@ -389,49 +409,43 @@ test "check while statement with non-bool condition should error" {
 test "check function call with wrong argument count should error" {
     const allocator = std.testing.allocator;
 
-    var symbols = symbol_table.SymbolTable.init(allocator);
+    var ctx = context.CompilationContext.init(allocator);
+    defer ctx.deinit();
+
+    var symbols = symbol_table.SymbolTable.init(&ctx);
     defer symbols.deinit();
 
-    var diag_list = diagnostics.DiagnosticList.init(allocator);
-    defer diag_list.deinit();
+    var diag_list = diagnostics.DiagnosticList.init(ctx.permanentAllocator());
 
-    // heap allocate arrays that will be freed by symbol table deinit
-    const params = try allocator.alloc(types.ResolvedType, 2);
-    params[0] = .i32;
-    params[1] = .i32;
+    var hover_table = hover_info.HoverInfoTable.init(&ctx);
+    defer hover_table.deinit();
 
-    const param_names = try allocator.alloc([]const u8, 2);
-    param_names[0] = "a";
-    param_names[1] = "b";
+    var location_table = symbol_locations.SymbolLocationTable.init(&ctx);
+    defer location_table.deinit();
 
-    const effects = try allocator.alloc(types.Effect, 0);
-    const is_cap_params = try allocator.alloc(bool, 2);
-    is_cap_params[0] = false;
-    is_cap_params[1] = false;
+    // add a function to the symbol table
+    const params = try ctx.permanentAllocator().alloc(types.ResolvedType, 1);
+    params[0] = types.ResolvedType.i32;
+    const param_names = try ctx.permanentAllocator().alloc([]const u8, 1);
+    param_names[0] = "x";
+    const is_cap = try ctx.permanentAllocator().alloc(bool, 1);
+    is_cap[0] = false;
 
-    const func_symbol = symbol_table.Symbol{
+    try symbols.insertGlobal("test_func", .{
         .function = .{
             .name = "test_func",
             .type_params = null,
             .params = params,
             .param_names = param_names,
-            .return_type = .unit_type,
-            .effects = effects,
+            .return_type = types.ResolvedType.i32,
+            .effects = &[_]types.Effect{},
             .error_domain = null,
-            .is_capability_param = is_cap_params,
+            .is_capability_param = is_cap,
         },
-    };
-
-    try symbols.insertGlobal("test_func", func_symbol);
-
-    var hover_table = hover_info.HoverInfoTable.init(allocator);
-    defer hover_table.deinit();
-
-    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
-    defer location_table.deinit();
+    });
 
     var checker = type_checker.TypeChecker.init(
-        allocator,
+        &ctx,
         &symbols,
         &diag_list,
         "test.fe",
@@ -439,13 +453,12 @@ test "check function call with wrong argument count should error" {
         &location_table,
     );
 
-    var callee = ast.Expr{ .identifier = .{ .name = "test_func", .loc = .{ .line = 1, .column = 1 } } };
-    var expr = ast.Expr{
-        .call = .{
-            .callee = &callee,
-            .args = &[_]*ast.Expr{},
-        },
-    };
+    // call with no arguments (should require 1)
+    var callee = ast.Expr{ .identifier = .{ .name = "test_func", .loc = .{ .line = 1, .column = 1, .length = 9 } } };
+    var expr = ast.Expr{ .call = .{
+        .callee = &callee,
+        .args = &[_]*ast.Expr{},
+    } };
 
     _ = try checker.checkExpr(&expr);
 
@@ -455,20 +468,31 @@ test "check function call with wrong argument count should error" {
 test "check assignment to immutable variable should error" {
     const allocator = std.testing.allocator;
 
-    var symbols = symbol_table.SymbolTable.init(allocator);
+    var ctx = context.CompilationContext.init(allocator);
+    defer ctx.deinit();
+
+    var symbols = symbol_table.SymbolTable.init(&ctx);
     defer symbols.deinit();
 
-    var diag_list = diagnostics.DiagnosticList.init(allocator);
-    defer diag_list.deinit();
+    var diag_list = diagnostics.DiagnosticList.init(ctx.permanentAllocator());
 
-    var hover_table = hover_info.HoverInfoTable.init(allocator);
+    var hover_table = hover_info.HoverInfoTable.init(&ctx);
     defer hover_table.deinit();
 
-    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
+    var location_table = symbol_locations.SymbolLocationTable.init(&ctx);
     defer location_table.deinit();
 
+    // add an immutable variable to the symbol table
+    try symbols.insertGlobal("x", .{
+        .constant = .{
+            .name = "x",
+            .type_annotation = types.ResolvedType.i32,
+            .scope_level = 0,
+        },
+    });
+
     var checker = type_checker.TypeChecker.init(
-        allocator,
+        &ctx,
         &symbols,
         &diag_list,
         "test.fe",
@@ -476,21 +500,9 @@ test "check assignment to immutable variable should error" {
         &location_table,
     );
 
-    const const_symbol = symbol_table.Symbol{
-        .variable = .{
-            .name = "x",
-            .type_annotation = .i32,
-            .is_mutable = false,
-            .scope_level = 0,
-        },
-    };
-
-    try checker.current_scope.insert("x", const_symbol);
-
     var value = ast.Expr{ .number = "42" };
-
     const assign = ast.AssignStmt{
-        .target = .{ .name = "x", .loc = .{ .line = 1, .column = 1 } },
+        .target = .{ .name = "x", .loc = .{ .line = 1, .column = 1, .length = 1 } },
         .value = &value,
     };
 
@@ -502,20 +514,40 @@ test "check assignment to immutable variable should error" {
 test "check return type mismatch should error" {
     const allocator = std.testing.allocator;
 
-    var symbols = symbol_table.SymbolTable.init(allocator);
+    var ctx = context.CompilationContext.init(allocator);
+    defer ctx.deinit();
+
+    var symbols = symbol_table.SymbolTable.init(&ctx);
     defer symbols.deinit();
 
-    var diag_list = diagnostics.DiagnosticList.init(allocator);
-    defer diag_list.deinit();
+    var diag_list = diagnostics.DiagnosticList.init(ctx.permanentAllocator());
 
-    var hover_table = hover_info.HoverInfoTable.init(allocator);
+    var hover_table = hover_info.HoverInfoTable.init(&ctx);
     defer hover_table.deinit();
 
-    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
+    var location_table = symbol_locations.SymbolLocationTable.init(&ctx);
     defer location_table.deinit();
 
+    // add a function that returns i32
+    const params = try ctx.permanentAllocator().alloc(types.ResolvedType, 0);
+    const param_names = try ctx.permanentAllocator().alloc([]const u8, 0);
+    const is_cap = try ctx.permanentAllocator().alloc(bool, 0);
+
+    try symbols.insertGlobal("test_func", .{
+        .function = .{
+            .name = "test_func",
+            .type_params = null,
+            .params = params,
+            .param_names = param_names,
+            .return_type = types.ResolvedType.i32,
+            .effects = &[_]types.Effect{},
+            .error_domain = null,
+            .is_capability_param = is_cap,
+        },
+    });
+
     var checker = type_checker.TypeChecker.init(
-        allocator,
+        &ctx,
         &symbols,
         &diag_list,
         "test.fe",
@@ -523,24 +555,19 @@ test "check return type mismatch should error" {
         &location_table,
     );
 
-    var func_symbol = symbol_table.FunctionSymbol{
-        .name = "test",
-        .type_params = null,
-        .params = &[_]types.ResolvedType{},
-        .param_names = &[_][]const u8{},
-        .return_type = .i32,
-        .effects = &[_]types.Effect{},
-        .error_domain = null,
-        .is_capability_param = &[_]bool{},
-    };
+    // set current function context
+    if (symbols.lookupGlobal("test_func")) |sym| {
+        if (sym == .function) {
+            var func_sym = sym.function;
+            checker.current_function = &func_sym;
+        }
+    }
 
-    checker.current_function = &func_symbol;
-
-    var return_value = ast.Expr{ .string = "wrong type" };
-
+    // return a string instead of i32
+    var value = ast.Expr{ .string = "hello" };
     const return_stmt = ast.ReturnStmt{
-        .value = &return_value,
-        .loc = .{ .line = 1, .column = 1 },
+        .value = &value,
+        .loc = .{ .line = 1, .column = 1, .length = 6 },
     };
 
     try checker.checkReturnStmt(return_stmt);
@@ -551,20 +578,22 @@ test "check return type mismatch should error" {
 test "check ensure with non-bool condition should error" {
     const allocator = std.testing.allocator;
 
-    var symbols = symbol_table.SymbolTable.init(allocator);
+    var ctx = context.CompilationContext.init(allocator);
+    defer ctx.deinit();
+
+    var symbols = symbol_table.SymbolTable.init(&ctx);
     defer symbols.deinit();
 
-    var diag_list = diagnostics.DiagnosticList.init(allocator);
-    defer diag_list.deinit();
+    var diag_list = diagnostics.DiagnosticList.init(ctx.permanentAllocator());
 
-    var hover_table = hover_info.HoverInfoTable.init(allocator);
+    var hover_table = hover_info.HoverInfoTable.init(&ctx);
     defer hover_table.deinit();
 
-    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
+    var location_table = symbol_locations.SymbolLocationTable.init(&ctx);
     defer location_table.deinit();
 
     var checker = type_checker.TypeChecker.init(
-        allocator,
+        &ctx,
         &symbols,
         &diag_list,
         "test.fe",
@@ -572,39 +601,41 @@ test "check ensure with non-bool condition should error" {
         &location_table,
     );
 
+    // ensure without being in an error domain should error
     var condition = ast.Expr{ .number = "42" };
-    var expr = ast.Expr{
-        .ensure = .{
-            .condition = &condition,
-            .error_expr = .{
-                .variant = "Error",
-                .fields = &[_]ast.FieldAssignment{},
-            },
+    var expr = ast.Expr{ .ensure = .{
+        .condition = &condition,
+        .error_expr = .{
+            .variant = "SomeError",
+            .fields = &[_]ast.FieldAssignment{},
         },
-    };
+    } };
 
     _ = try checker.checkExpr(&expr);
 
+    // should error because we're not in a function with an error domain
     try std.testing.expect(diag_list.hasErrors());
 }
 
 test "check match arms with different types should error" {
     const allocator = std.testing.allocator;
 
-    var symbols = symbol_table.SymbolTable.init(allocator);
+    var ctx = context.CompilationContext.init(allocator);
+    defer ctx.deinit();
+
+    var symbols = symbol_table.SymbolTable.init(&ctx);
     defer symbols.deinit();
 
-    var diag_list = diagnostics.DiagnosticList.init(allocator);
-    defer diag_list.deinit();
+    var diag_list = diagnostics.DiagnosticList.init(ctx.permanentAllocator());
 
-    var hover_table = hover_info.HoverInfoTable.init(allocator);
+    var hover_table = hover_info.HoverInfoTable.init(&ctx);
     defer hover_table.deinit();
 
-    var location_table = symbol_locations.SymbolLocationTable.init(allocator);
+    var location_table = symbol_locations.SymbolLocationTable.init(&ctx);
     defer location_table.deinit();
 
     var checker = type_checker.TypeChecker.init(
-        allocator,
+        &ctx,
         &symbols,
         &diag_list,
         "test.fe",
@@ -612,28 +643,21 @@ test "check match arms with different types should error" {
         &location_table,
     );
 
-    var value = ast.Expr{ .identifier = .{ .name = "x", .loc = .{ .line = 1, .column = 1 } } };
-    var body1 = ast.Expr{ .number = "1" };
-    var body2 = ast.Expr{ .string = "hello" };
+    var match_value = ast.Expr{ .number = "42" };
+    var arm1_body = ast.Expr{ .number = "1" };
+    var arm2_body = ast.Expr{ .string = "hello" };
 
-    var match_arms = [_]ast.MatchArm{
-        .{
-            .pattern = .{ .number = "1" },
-            .body = &body1,
-        },
-        .{
-            .pattern = .{ .number = "2" },
-            .body = &body2,
-        },
-    };
-    var expr = ast.Expr{
-        .match_expr = .{
-            .value = &value,
-            .arms = match_arms[0..],
-        },
+    var arms = [_]ast.MatchArm{
+        .{ .pattern = .{ .number = "1" }, .body = &arm1_body },
+        .{ .pattern = .wildcard, .body = &arm2_body },
     };
 
+    var expr = ast.Expr{ .match_expr = .{
+        .value = &match_value,
+        .arms = arms[0..],
+    } };
     _ = try checker.checkExpr(&expr);
 
+    // should error because arms have different types
     try std.testing.expect(diag_list.hasErrors());
 }
