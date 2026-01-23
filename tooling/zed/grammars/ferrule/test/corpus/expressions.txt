@@ -1,0 +1,195 @@
+================================================================================
+Binary expressions
+================================================================================
+
+const a = 1 + 2;
+const b = 3 * 4;
+const c = x && y;
+const d = a == b;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (const_declaration
+    name: (identifier)
+    value: (binary_expression
+      (integer_literal)
+      (integer_literal)))
+  (const_declaration
+    name: (identifier)
+    value: (binary_expression
+      (integer_literal)
+      (integer_literal)))
+  (const_declaration
+    name: (identifier)
+    value: (binary_expression
+      (identifier)
+      (identifier)))
+  (const_declaration
+    name: (identifier)
+    value: (binary_expression
+      (identifier)
+      (identifier))))
+
+================================================================================
+Unary expressions
+================================================================================
+
+const a = -x;
+const b = !flag;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (const_declaration
+    name: (identifier)
+    value: (unary_expression
+      (identifier)))
+  (const_declaration
+    name: (identifier)
+    value: (unary_expression
+      (identifier))))
+
+================================================================================
+Function call
+================================================================================
+
+const result = add(1, 2);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (const_declaration
+    name: (identifier)
+    value: (call_expression
+      (identifier)
+      (integer_literal)
+      (integer_literal))))
+
+================================================================================
+Member expression
+================================================================================
+
+const name = user.name;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (const_declaration
+    name: (identifier)
+    value: (member_expression
+      (identifier)
+      (identifier))))
+
+================================================================================
+Index expression
+================================================================================
+
+const item = items[0];
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (const_declaration
+    name: (identifier)
+    value: (index_expression
+      (identifier)
+      (integer_literal))))
+
+================================================================================
+Array expression
+================================================================================
+
+const numbers = [1, 2, 3, 4, 5];
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (const_declaration
+    name: (identifier)
+    value: (array_expression
+      (integer_literal)
+      (integer_literal)
+      (integer_literal)
+      (integer_literal)
+      (integer_literal))))
+
+================================================================================
+Record expression
+================================================================================
+
+const user = User { name: "Alice", age: 30 };
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (const_declaration
+    name: (identifier)
+    value: (record_expression
+      (type_identifier)
+      (identifier)
+      (string_literal)
+      (identifier)
+      (integer_literal))))
+
+================================================================================
+Range expression
+================================================================================
+
+const range = 1..10;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (const_declaration
+    name: (identifier)
+    value: (binary_expression
+      (integer_literal)
+      (integer_literal))))
+
+================================================================================
+String literals
+================================================================================
+
+const greeting = "hello world";
+const escaped = "line1\nline2";
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (const_declaration
+    name: (identifier)
+    value: (string_literal))
+  (const_declaration
+    name: (identifier)
+    value: (string_literal
+      (escape_sequence))))
+
+================================================================================
+Number literals
+================================================================================
+
+const dec = 42;
+const hex = 0xFF;
+const bin = 0b1010;
+const oct = 0o755;
+const flt = 3.14;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (const_declaration
+    name: (identifier)
+    value: (integer_literal))
+  (const_declaration
+    name: (identifier)
+    value: (integer_literal))
+  (const_declaration
+    name: (identifier)
+    value: (integer_literal))
+  (const_declaration
+    name: (identifier)
+    value: (integer_literal))
+  (const_declaration
+    name: (identifier)
+    value: (float_literal)))

@@ -1,0 +1,157 @@
+================================================================================
+Package declaration
+================================================================================
+
+package example.hello;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_declaration
+    path: (package_path
+      (identifier)
+      (identifier))))
+
+================================================================================
+Simple function
+================================================================================
+
+function add(x: i32, y: i32) -> i32 {
+  return x + y;
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list
+      (parameter
+        name: (identifier)
+        type: (primitive_type))
+      (parameter
+        name: (identifier)
+        type: (primitive_type)))
+    return_type: (primitive_type)
+    body: (block
+      (return_statement
+        (binary_expression
+          (identifier)
+          (identifier))))))
+
+================================================================================
+Function with effects
+================================================================================
+
+function main() -> i32 effects [io] {
+  return 0;
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    (effects_clause
+      (identifier))
+    body: (block
+      (return_statement
+        (integer_literal)))))
+
+================================================================================
+Const declaration with type
+================================================================================
+
+const x: i32 = 42;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (const_declaration
+    name: (identifier)
+    (primitive_type)
+    value: (integer_literal)))
+
+================================================================================
+Var declaration with inference
+================================================================================
+
+var counter = 0;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (const_declaration
+    name: (identifier)
+    value: (integer_literal)))
+
+================================================================================
+Type declaration
+================================================================================
+
+type UserId = { id: u64 };
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (type_declaration
+    name: (type_identifier)
+    type: (record_type
+      (record_field
+        (identifier)
+        (primitive_type)))))
+
+================================================================================
+Domain declaration (inline)
+================================================================================
+
+domain IoError {
+  NotFound { path: String }
+  Denied { path: String }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (domain_declaration
+    name: (type_identifier)
+    (error_variant
+      (type_identifier)
+      (record_body
+        (record_field
+          (identifier)
+          (primitive_type))))
+    (error_variant
+      (type_identifier)
+      (record_body
+        (record_field
+          (identifier)
+          (primitive_type))))))
+
+================================================================================
+Domain declaration (union)
+================================================================================
+
+domain AppError = IoError | ParseError;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (domain_declaration
+    name: (type_identifier)
+    (type_identifier)
+    (type_identifier)))
+
+================================================================================
+Use error declaration
+================================================================================
+
+use error IoError;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (use_declaration
+    (type_identifier)))

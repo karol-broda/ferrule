@@ -1,0 +1,40 @@
+{
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/config.schema.json",
+  "grammars": [
+    {
+      "name": "ferrule",
+      "camelcase": "Ferrule",
+      "title": "ferrule",
+      "scope": "source.ferrule",
+      "file-types": [
+        "fe"
+      ],
+      "injection-regex": "^ferrule$",
+      "class-name": "TreeSitterFerrule"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT",
+    "description": "a modern systems language with explicit control",
+    "authors": [
+      {
+        "name": "Karol Broda",
+        "email": "me@karolbroda.com",
+        "url": "https://karolbroda.com/"
+      }
+    ],
+    "links": {
+      "repository": "https://github.com/karol-broda/ferrule"
+    }
+  },
+  "bindings": {
+    "c": true,
+    "go": true,
+    "node": true,
+    "python": true,
+    "rust": true,
+    "swift": true,
+    "zig": false
+  }
+}

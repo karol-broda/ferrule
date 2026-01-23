@@ -1,0 +1,162 @@
+================================================================================
+If statement
+================================================================================
+
+function test() -> i32 {
+  if x == 0 {
+    return 1;
+  } else {
+    return 2;
+  }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      (if_statement
+        condition: (binary_expression
+          (identifier)
+          (integer_literal))
+        consequence: (block
+          (return_statement
+            (integer_literal)))
+        alternative: (block
+          (return_statement
+            (integer_literal)))))))
+
+================================================================================
+For loop
+================================================================================
+
+function test() -> Unit {
+  for i in items {
+    process(i);
+  }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      (for_statement
+        (identifier)
+        (identifier)
+        (block
+          (expression_statement
+            (call_expression
+              (identifier)
+              (identifier))))))))
+
+================================================================================
+While loop
+================================================================================
+
+function test() -> Unit {
+  while n > 0 {
+    n = n - 1;
+  }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      (while_statement
+        (binary_expression
+          (identifier)
+          (integer_literal))
+        (block
+          (expression_statement
+            (binary_expression
+              (identifier)
+              (binary_expression
+                (identifier)
+                (integer_literal)))))))))
+
+================================================================================
+Match statement
+================================================================================
+
+function test(code: i32) -> String {
+  match code {
+    200 -> "ok";
+    404 -> "not found";
+    _ -> "unknown";
+  }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list
+      (parameter
+        name: (identifier)
+        type: (primitive_type)))
+    return_type: (primitive_type)
+    body: (block
+      (match_statement
+        (identifier)
+        (match_arm
+          (pattern
+            (integer_literal))
+          (string_literal))
+        (match_arm
+          (pattern
+            (integer_literal))
+          (string_literal))
+        (match_arm
+          (pattern)
+          (string_literal))))))
+
+================================================================================
+Break and continue
+================================================================================
+
+function test() -> Unit {
+  for i in items {
+    if i == 0 {
+      continue;
+    }
+    if i > 10 {
+      break;
+    }
+  }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      (for_statement
+        (identifier)
+        (identifier)
+        (block
+          (if_statement
+            condition: (binary_expression
+              (identifier)
+              (integer_literal))
+            consequence: (block))
+          (if_statement
+            condition: (binary_expression
+              (identifier)
+              (integer_literal))
+            consequence: (block)))))))
