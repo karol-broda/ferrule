@@ -1,17 +1,14 @@
 import { spec, rfcs } from 'fumadocs-mdx:collections/server';
 import { type InferPageType, loader } from 'fumadocs-core/source';
-import { lucideIconsPlugin } from 'fumadocs-core/source/lucide-icons';
 
 export const specSource = loader({
   baseUrl: '/spec',
   source: spec.toFumadocsSource(),
-  plugins: [lucideIconsPlugin()],
 });
 
 export const rfcsSource = loader({
   baseUrl: '/rfcs',
   source: rfcs.toFumadocsSource(),
-  plugins: [lucideIconsPlugin()],
 });
 
 export function getSpecPageImage(page: InferPageType<typeof specSource>) {
