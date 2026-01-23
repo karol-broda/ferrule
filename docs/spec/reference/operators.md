@@ -1,7 +1,17 @@
-# Operators
+---
+title: operators
+status: α1
+implemented:
+  - arithmetic-operators
+  - comparison-operators
+  - logical-operators
+  - bitwise-operators
+pending: []
+deferred:
+  - operator-overloading (α2)
+---
 
-> **scope:** operator precedence, semantics, typing rules  
-> **related:** [grammar.md](grammar.md) | [../core/types.md](../core/types.md)
+# operators
 
 ---
 
@@ -150,9 +160,29 @@ The `++` operator concatenates strings. Both operands must be `String`.
 
 ---
 
-## Operator Overloading
+## operator overloading (α2)
 
-α1 does **not** support user-defined operator overloading. Operators have fixed semantics for built-in types.
+α1 does **not** support user-defined operator overloading. operators have fixed semantics for built-in types.
+
+planned for α2: operators desugar to interface methods:
+
+```ferrule
+// a + b desugars to T.Add.add(a, b)
+// a == b desugars to T.Eq.eq(a, b)
+// a < b desugars to T.Ord.lt(a, b)
+
+type Add<T> = { add: (T, T) -> T };
+
+impl Add<Point> {
+    add: function(a: Point, b: Point) -> Point {
+        return Point { x: a.x + b.x, y: a.y + b.y };
+    }
+}
+
+const p3 = p1 + p2;  // calls Point.Add.add(p1, p2)
+```
+
+see [../core/generics.md](/docs/core/generics) for more on the impl syntax.
 
 ---
 

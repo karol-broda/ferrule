@@ -1,7 +1,15 @@
-# Keywords
+---
+title: keywords
+status: α1
+implemented:
+  - declaration-keywords
+  - control-flow-keywords
+  - type-keywords
+pending: []
+deferred: []
+---
 
-> **scope:** reserved words in Ferrule α1  
-> **related:** [grammar.md](grammar.md) | [../core/lexical.md](../core/lexical.md)
+# keywords
 
 ---
 
@@ -70,40 +78,63 @@ These identifiers are reserved and cannot be used as variable, function, or type
 | `map` | mapped types |
 | `distribute` | distributive conditional |
 
-### Other
+### memory and safety
 
-| Keyword | Purpose |
+| keyword | purpose |
 |---------|---------|
-| `with` | context/derivation modifier |
+| `unsafe` | unsafe block |
+| `move` | explicit ownership transfer |
+| `copy` | explicit copy annotation |
+| `clone` | explicit clone |
+| `static` | static allocation |
+
+### other
+
+| keyword | purpose |
+|---------|---------|
+| `with` | context/capability modifier |
 | `context` | context ledger |
 | `as` | aliasing |
 | `comptime` | compile-time evaluation |
 | `asm` | inline assembly |
-| `component` | WASM component |
-| `unsafe_cast` | unsafe type cast |
+| `component` | wasm component |
 | `unknown` | dynamic type requiring narrowing |
 | `Unit` | unit type/value |
-| `distribute` | distributive conditional types |
-| `infer` | type inference in conditionals |
-| `map` | mapped types |
-| `out` | covariant variance |
 
 ---
 
-## Removed Keywords
+## planned keywords (α2)
 
-These were in earlier drafts but are **not** in α1:
+| keyword | purpose |
+|---------|---------|
+| `impl` | implementation sugar |
+| `derive` | auto-derive implementations |
+| `test` | test block declaration |
+| `once` | single-iteration loop |
+| `assert` | compile-time assertions |
+| `verify` | verification blocks |
+| `valid` | ownership state check |
+| `moved` | ownership state check |
+| `packed` | packed struct layout |
+| `extern` | c-compatible struct layout |
+| `transmute` | bit reinterpretation |
 
-| Removed | Reason |
+---
+
+## removed keywords
+
+these were in earlier drafts but are **not** in α1:
+
+| removed | reason |
 |---------|--------|
-| `role` | Replaced by record-based polymorphism |
-| `trait` | Never used |
-| `impl` | Replaced by namespaced constants |
-| `self` | Functions use explicit first parameter |
-| `fn` | Use `function` for all functions |
-| `===` | Use `==` for equality (no triple equals) |
-| `!==` | Use `!=` for inequality |
-| `null` | Use `None` variant of `Maybe<T>` instead |
+| `role` | replaced by record-based polymorphism |
+| `trait` | never used |
+| `self` | functions use explicit first parameter |
+| `fn` | use `function` for all functions |
+| `===` | use `==` for equality (no triple equals) |
+| `!==` | use `!=` for inequality |
+| `null` | use `None` variant of `Maybe<T>` instead |
+| `unsafe_cast` | replaced by `unsafe` block + transmute |
 
 ---
 

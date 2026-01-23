@@ -1,0 +1,18 @@
+{
+  "title": "ferrule rfcs",
+  "root": true,
+  "pages": [
+    "index",
+    "---α2 target---",
+    "0001-error-transformation",
+    "0002-debug-context",
+    "0003-const-generics",
+    "---β target---",
+    "0005-higher-kinded-types",
+    "0006-mapped-types",
+    "0010-structured-concurrency",
+    "0011-async-effects",
+    "---resources---",
+    "template"
+  ]
+}

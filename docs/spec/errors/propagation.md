@@ -1,122 +1,96 @@
-# Error Propagation
-
-> **scope:** `ok`, `err`, `check`, `ensure`, `map_error`, context frames  
-> **related:** [domains.md](domains.md) | [../functions/syntax.md](../functions/syntax.md)
-
+---
+title: error propagation
+status: α1
+implemented:
+  - ok-construction
+  - err-construction
+  - check-propagation
+pending:
+  - ensure-guards
+  - check-with-context
+deferred:
+  - map_error (α2)
+  - context-ledgers (α2)
 ---
 
-## Overview
+# error propagation
 
-Ferrule provides lightweight sugar for working with `Result<T, E>` values. All error handling is explicit — no hidden control flow.
+ferrule provides lightweight sugar for working with `Result<T, E>`. all error handling is explicit. no hidden control flow, no exceptions.
 
----
+## construction
 
-## Construction
+### ok
 
-### `ok value`
-
-Wrap a success value in `Result`:
+wrap a success value:
 
 ```ferrule
 return ok data;
 ```
 
-Only valid in functions with `error E` clause.
+only valid in functions with `error E` clause.
 
-### `err Variant { ... }`
+### err
 
-Construct an error:
+construct an error:
 
 ```ferrule
 return err NotFound { path: p };
 ```
 
-Only valid in functions with `error E` clause.
+only valid in functions with `error E` clause. using `ok` or `err` without an error clause is a compile error.
 
-> Using `ok` or `err` in a function without an `error E` clause is a compile error.
+## propagation
 
----
+### check
 
-## Propagation
-
-### `check expr`
-
-Unwrap a `Result` or return the error immediately:
+unwrap a Result or return the error immediately:
 
 ```ferrule
 const file = check fs.open(p);
-// if fs.open returns err, check returns it from the current function
-// if fs.open returns ok, check unwraps the value
 ```
 
-### `check expr with { frame... }`
+if `fs.open` returns err, check returns it from the current function. if it returns ok, check unwraps the value.
 
-Unwrap or return error, adding context frames:
+this is the workhorse of error handling. it's like rust's `?` but more explicit.
+
+### check with context
+
+add context frames when propagating:
 
 ```ferrule
 const file = check fs.open(p) with { op: "open", path: p };
 ```
 
-Context frames attach key/value pairs to the error for debugging.
+context frames attach key/value pairs to the error for debugging. useful for understanding where errors came from.
 
----
+> **note (α1):** context frames are debug-only in α1. they're stripped in release builds. the syntax is available but context is only attached in debug mode. full context ledgers are α2.
 
-## Guards
+## guards
 
-### `ensure condition else err Variant { ... }`
+### ensure
 
-Guard pattern for early error return:
+guard pattern for early error return:
 
 ```ferrule
-ensure capability.granted(fs) === true else err Denied { path: p };
 ensure port >= 1 && port <= 65535 else err Invalid { message: "port out of range" };
+ensure capability.granted(fs) == true else err Denied { path: p };
 ```
 
----
-
-## Domain Adaptation
-
-### `map_error expr using (e => NewError)`
-
-Adapt a foreign error domain while preserving context frames:
+if the condition is false, the error is returned. this replaces the pattern:
 
 ```ferrule
-const bytes = map_error read_file(p) using (e => ClientError.File { cause: e });
+if port < 1 || port > 65535 {
+    return err Invalid { message: "port out of range" };
+}
 ```
 
-The mapping function receives the original error and returns a new error in the current domain.
-
----
-
-## Context Frames
-
-Every `err` or `check ... with { ... }` attaches **key/value frames**:
-
-```ferrule
-check fs.read_all(file) with { 
-  op: "read_all", 
-  path: p,
-  region: "us-east-1",
-  request_id: rid 
-};
-```
-
-Frames:
-- flow across async boundaries automatically
-- are preserved through `map_error`
-- appear in error reports and logs
-
-See [../concurrency/tasks.md](../concurrency/tasks.md) for async context propagation.
-
----
-
-## Complete Example
+## complete example
 
 ```ferrule
 use error IoError;
 
 function read_file(p: Path, cap fs: Fs) -> Bytes error IoError effects [fs] {
-  ensure capability.granted(fs) === true else err Denied { path: p };
+    ensure capability.granted(fs) == true else err Denied { path: p };
 
   const file = check fs.open(p) with { op: "open" };
   const data = check fs.read_all(file) with { op: "read_all" };
@@ -125,57 +99,33 @@ function read_file(p: Path, cap fs: Fs) -> Bytes error IoError effects [fs] {
 }
 ```
 
----
+## what's planned
 
-## Error Composition Example
+**map_error** (α2) for adapting error domains:
 
 ```ferrule
-domain ClientError { 
-  File { cause: IoError } 
-  | Parse { message: String } 
-}
-
-function load_config(p: Path, cap fs: Fs) -> Config error ClientError effects [fs] {
-  const bytes = map_error read_file(p, fs) 
-                using (e => ClientError.File { cause: e });
-  
-  return map_error parser.config(bytes) 
-         using (e => ClientError.Parse { message: parser.explain(e) });
-}
+const bytes = map_error read_file(p) using (e => ClientError.File { cause: e });
 ```
 
----
+this lets you convert between error domains while preserving context.
 
-## Context Ledgers
-
-For request-scoped context that flows through all error handling:
+**context ledgers** (α2) for request-scoped context:
 
 ```ferrule
 with context { request_id: rid, user_id: uid } in {
   const resp = fetch(url, deadline);
-  match resp { 
-    ok _  -> log.info("ok"); 
-    err e -> log.warn("failed").with({ error: e });
-  }
+    // all errors inside this block have request_id and user_id attached
 }
 ```
 
-Ledgers:
-- are immutable maps bound to a scope
-- automatically attach to all `err`/`check` within the scope
-- cross async boundaries without thread-locals
+ledgers automatically attach to all `err`/`check` within the scope.
 
----
+## summary
 
-## Summary
-
-| Syntax | Purpose |
+| syntax | purpose |
 |--------|---------|
 | `ok value` | construct success |
 | `err Variant { ... }` | construct error |
 | `check expr` | unwrap or propagate |
 | `check expr with { ... }` | unwrap or propagate with context |
 | `ensure cond else err ...` | guard with early return |
-| `map_error expr using (e => ...)` | adapt error domain |
-
-

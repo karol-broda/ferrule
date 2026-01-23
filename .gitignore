@@ -7,3 +7,5 @@ out/
 .npmrc
 .DS_Store
 Thumbs.db
+
+tmp/

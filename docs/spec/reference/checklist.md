@@ -1,7 +1,9 @@
-# α1 Compliance Checklist
+---
+title: compliance checklist
+status: α1
+---
 
-> **scope:** checklist for verifying α1 specification compliance  
-> **related:** all spec documents
+# α1 compliance checklist
 
 ---
 

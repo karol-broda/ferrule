@@ -1,7 +1,19 @@
-# Diagnostics & Lints
+---
+title: diagnostics and lints
+status: α1
+implemented:
+  - basic-errors
+  - parse-errors
+pending:
+  - type-errors
+  - effect-errors
+  - move-errors
+deferred:
+  - beautiful-diagnostics (α2)
+  - fix-suggestions (α2)
+---
 
-> **scope:** compiler error messages, warnings, helpful hints  
-> **related:** [../functions/effects.md](../functions/effects.md) | [../errors/propagation.md](../errors/propagation.md)
+# diagnostics and lints
 
 ---
 

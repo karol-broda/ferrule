@@ -1,23 +1,41 @@
-# Types & Values
-
-> **scope:** scalar types, compound types, parametric types, unions, refinements, nominal typing, polymorphism  
-> **related:** [declarations.md](declarations.md) | [generics.md](generics.md) | [../memory/views.md](../memory/views.md)
-
+---
+title: types and values
+status: α1
+implemented:
+  - nominal-typing
+  - scalar-types
+  - records
+  - unions
+  - result-type
+  - maybe-type
+  - arrays
+pending:
+  - copy-vs-move
+  - string-internals
+deferred:
+  - refinements (α2)
+  - type-level-naturals (β)
+  - variance-annotations (α2)
+  - mapped-types (rfc)
+  - conditional-types (rfc)
+  - intersections (α2)
 ---
 
-## Nominal Typing (Strict)
+# types and values
 
-Ferrule uses **strict nominal typing**. Types with identical structure are NOT compatible:
+ferrule uses strict nominal typing. this means types with identical structure are not compatible. if you define two types that look the same, they're still different types.
+
+## nominal typing
 
 ```ferrule
 type UserId = { id: u64 };
 type PostId = { id: u64 };
 
 const user: UserId = { id: 1 };
-const post: PostId = user;  // ERROR: UserId is not PostId
+const post: PostId = user;  // error: UserId is not PostId
 ```
 
-To convert between types, use explicit functions:
+to convert between types, write a function:
 
 ```ferrule
 function toPostId(u: UserId) -> PostId {
@@ -25,110 +43,160 @@ function toPostId(u: UserId) -> PostId {
 }
 ```
 
----
+this is intentional. it prevents bugs where you accidentally pass a user id where a post id was expected.
 
-## Built-in Scalar Types
+## scalar types
 
-| Category | Types |
+| category | types |
 |----------|-------|
 | signed integers | `i8`, `i16`, `i32`, `i64`, `i128` |
 | unsigned integers | `u8`, `u16`, `u32`, `u64`, `u128`, `usize` |
-| floats | `f16`, `f32`, `f64` |
-| other | `Bool`, `Char`, `Unit` (zero-size) |
+| floats | `f32`, `f64` |
+| other | `Bool`, `Char`, `Unit` |
 
-> `String` and `Bytes` are region-allocated managed types, not scalars. See [String Internals](#string-internals).
+`String` is not a scalar. it's a managed type backed by a byte buffer. see [string internals](#string-internals).
 
----
+## number literals
 
-## Number Literals
-
-Number literals are **polymorphic in the AST** until resolved:
+number literals are polymorphic until resolved:
 
 ```ferrule
-const x = 42;           // resolved to i32 (default integer)
-const y = 3.14;         // resolved to f64 (default float)
-const port: u16 = 8080; // resolved to u16 (from annotation)
-const ratio: f32 = 3.14; // resolved to f32 (from annotation)
+const x = 42;           // i32 (default integer)
+const y = 3.14;         // f64 (default float)
+const port: u16 = 8080; // u16 (from annotation)
+const ratio: f32 = 3.14; // f32 (from annotation)
 ```
 
-**Rules:**
-- If annotated, use the annotation type
-- If not annotated, default to `i32` for integers, `f64` for floats
-- If literal doesn't fit the type, error
+rules:
+- if annotated, use that type
+- if not annotated, default to i32 for integers, f64 for floats
+- if the literal doesn't fit, error
 
 ```ferrule
-const x: u8 = 300;  // ERROR: 300 does not fit in u8
+const x: u8 = 300;  // error: 300 does not fit in u8
 ```
 
----
+## copy vs move types
 
-## No `any` Type
+types are either copy or move. this determines what happens on assignment.
 
-Ferrule has **no `any` type**. For dynamic data, use `unknown`:
+**copy types** are duplicated on assignment. the original stays valid:
+
+```ferrule
+const a: Point = { x: 1.0, y: 2.0 };
+const b = a;      // copied
+println(a.x);     // ok, a still valid
+```
+
+**move types** transfer ownership. the original becomes invalid:
+
+```ferrule
+const s: String = "hello";
+const t = s;      // moved
+// println(s);    // error: s was moved
+```
+
+by default:
+- primitives and small structs are copy
+- heap-allocated types (String, Box, File) are move
+- large structs are move
+
+you can annotate explicitly when needed:
+
+```ferrule
+type SmallBuffer = copy { data: Array<u8, 64> };
+type BigThing = move { data: Array<u8, 1024> };
+```
+
+to copy a move type, use clone:
+
+```ferrule
+const u = t.clone();  // explicit copy
+println(t);           // ok, t still valid
+println(u);           // ok, u is independent copy
+```
+
+see [../memory/ownership.md](/docs/memory/ownership) for more on move semantics.
+
+## no any type
+
+there's no `any` type. for dynamic data, use `unknown`:
 
 ```ferrule
 const data: unknown = parseExternal(input);
 
-// cannot use unknown directly
-data.field;  // ERROR: cannot access properties on unknown
+// can't use unknown directly
+data.field;  // error: can't access properties on unknown
 
 // must narrow first
 if data is User {
-  data.name;  // OK: data is now User
+    data.name;  // ok, data is now User
 }
-
-// or explicit unsafe cast (auditable)
-const user = unsafe_cast<User>(data);
 ```
 
----
+## arrays
 
-## Compound & Parametric Types
-
-### Arrays (Fixed Length)
+fixed-length arrays:
 
 ```ferrule
 Array<T, n>
 ```
 
-### Vectors (SIMD-aware)
+the length `n` is part of the type. `Array<u8, 10>` and `Array<u8, 20>` are different types.
+
+## vectors (simd)
+
+simd-aware fixed vectors:
 
 ```ferrule
 Vector<T, n>
 ```
 
-### Views (Fat Pointers)
+these map to hardware vector registers when possible.
+
+## views
+
+views are fat pointers that reference a range of elements:
 
 ```ferrule
-View<T>        // immutable: (ptr, len, region_id)
+View<T>        // immutable
 View<mut T>    // mutable
 ```
 
-See [../memory/views.md](../memory/views.md) for full semantics.
+views carry a pointer, length, and region id. they can't escape the scope where they were created. see [../memory/views.md](/docs/memory/views).
 
-### Strings
+## strings
 
 ```ferrule
-String    // immutable UTF-8 view
+String    // immutable utf-8 view
 ```
 
-For mutable byte manipulation, use `View<mut u8>`.
+strings are immutable. for mutable byte manipulation, use `View<mut u8>`.
 
-### Bytes
+## bytes
 
 ```ferrule
 Bytes     // immutable byte view
 ```
 
-For mutation, use `View<mut u8>`.
+for mutation, use `View<mut u8>`.
 
-### Records
+## records
+
+records are product types with named fields:
 
 ```ferrule
-{ field: Type, ... }
+type User = {
+    name: String,
+    age: u32,
+};
+
+const user = User { name: "alice", age: 30 };
 ```
 
-### Closed Unions (Discriminated)
+## unions
+
+unions are sum types with named variants:
 
 ```ferrule
 type ParseError = 
@@ -136,159 +204,104 @@ type ParseError =
   | Truncated { expected: u32, actual: u32 };
 ```
 
-Unions must be fully covered in `match` or use `_`. See [control-flow.md](control-flow.md#pattern-matching).
+you must handle all variants in a match, or use `_` to catch the rest. see [control-flow.md](/docs/control-flow).
 
----
-
-## Result Type (Built-in)
+## result type
 
 ```ferrule
 type Result<T, E> = | ok { value: T } | err { error: E };
 ```
 
-`ok value` and `err Variant { ... }` are sugar for constructing this union.
+`ok value` and `err variant { ... }` are sugar for constructing this union.
 
-See [../errors/propagation.md](../errors/propagation.md) for usage.
+see [../errors/propagation.md](/docs/errors/propagation).
 
----
-
-## Maybe Type (Built-in)
+## maybe type
 
 ```ferrule
 type Maybe<T> = | Some { value: T } | None;
 ```
 
-**Sugar:**
-- `T?` is equivalent to `Maybe<T>`
+`T?` is sugar for `Maybe<T>`:
 
 ```ferrule
 const x: u32? = Some { value: 42 };
 const y: u32? = None;
 ```
 
-There is **no optional chaining**. Handle `T?` via `match` or explicit comparisons.
+there's no optional chaining. handle `Maybe` via match or explicit comparisons.
 
----
+## polymorphism via records
 
-## Intersections
-
-```ferrule
-A & B
-```
-
-Combines record types. Used for composing operation records:
+instead of traits, ferrule uses records and explicit passing:
 
 ```ferrule
-type Hasher<T> = { hash: (T) -> u64, eq: (T, T) -> Bool };
-type Showable<T> = { show: (T) -> String };
-type HashShow<T> = Hasher<T> & Showable<T>;
-```
-
----
-
-## Refinements
-
-```ferrule
-type Port = u16 where self >= 1 && self <= 65535;
-```
-
-The `where` clause specifies a predicate:
-- **Compile-time:** checked when provable
-- **Runtime:** checked otherwise (returns error or traps)
-
----
-
-## Type-Level Naturals
-
-`Nat` type with arithmetic in bounds/shape expressions.
-
----
-
-## Variance
-
-Explicit variance annotations for generic type parameters:
-
-```ferrule
-// out = covariant (can only output T)
-type Producer<out T> = { get: () -> T };
-
-// in = contravariant (can only input T)
-type Consumer<in T> = { accept: (T) -> Unit };
-
-// invariant (default) — can input and output T
-type Box<T> = { value: T, set: (T) -> Unit };
-```
-
----
-
-## Polymorphism via Records
-
-Instead of traits/roles, Ferrule uses **records + generics + explicit passing**:
-
-```ferrule
-// 1. define operations as record types
+// define operations as record types
 type Hasher<T> = { 
   hash: (T) -> u64, 
   eq: (T, T) -> Bool 
 };
 
-// 2. define type
-type UserId = { id: u64 };
-
-// 3. create implementation as namespaced constant
+// create implementation as namespaced constant
 const UserId.hasher: Hasher<UserId> = {
   hash: function(u: UserId) -> u64 { return u.id; },
   eq: function(a: UserId, b: UserId) -> Bool { return a.id == b.id; }
 };
 
-// 4. generic function takes record as parameter
+// generic function takes record as parameter
 function dedupe<T>(items: View<T>, h: Hasher<T>) -> View<T> effects [alloc] {
   // use h.hash(item), h.eq(a, b)
 }
 
-// 5. explicit usage
+// explicit usage
 const unique = dedupe(users, UserId.hasher);
 ```
 
-**No OOP features:**
-- No `trait` / `role` / `protocol` keywords
-- No `impl` blocks
-- No method syntax (`x.method()`)
-- No `self` keyword
-- No automatic resolution
+no trait/role/protocol keywords. no impl blocks. no self. no automatic resolution.
 
-See [generics.md](generics.md) for full generics specification.
+the plan is to add `impl` sugar and `derive` in a future version. see [generics.md](/docs/generics).
 
----
+## string internals
 
-## Mapped Types
+`String` is a managed view over utf-8 bytes. internally it's `(ptr, len, region_id)`. utf-8 validity is guaranteed by construction.
 
+strings are immutable. to modify:
+
+1. copy to a `View<mut u8>` buffer
+2. modify the buffer
+3. validate and construct new string via `string.from_utf8(view)`
+
+```ferrule
+const result = string.from_utf8(modified_bytes);
+// result is Result<String, Utf8Error>
+```
+
+## features deferred to later
+
+these are designed but not in α1:
+
+**refinements** (α2):
+```ferrule
+type Port = u16 where self >= 1 && self <= 65535;
+```
+
+**variance annotations** (α2):
+```ferrule
+type Producer<out T> = { get: () -> T };
+type Consumer<in T> = { accept: (T) -> Unit };
+```
+
+**intersections** (α2):
+```ferrule
+type HashShow<T> = Hasher<T> & Showable<T>;
+```
+
+**mapped types** (rfc):
 ```ferrule
 type Readonly<T> = map T { K => { readonly: true, type: T[K] } };
 ```
 
----
-
-## Conditional Types
-
+**conditional types** (rfc):
 ```ferrule
 type Unwrap<T> = if T is Result<infer U, infer E> then U else T;
 ```
-
-**Non-distributive by default.** For distribution over unions:
-
-```ferrule
-type Distributed<T> = distribute T { each U => Array<U> };
-```
-
----
-
-## String Internals
-
-`String` is a managed view over UTF-8 bytes with region binding `(ptr, len, region_id)`. UTF-8 validity is guaranteed by construction.
-
-Strings are **immutable**. To modify string data:
-
-1. Copy to a new `View<mut u8>` buffer in a region
-2. Modify the buffer
-3. Validate and construct a new String via `string.from_utf8(view)` which returns `Result<String, Utf8Error>`

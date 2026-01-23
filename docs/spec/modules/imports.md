@@ -1,11 +1,56 @@
-# Imports
+---
+title: imports
+status: α1
+implemented: []
+pending:
+  - basic-import
+  - selective-import
+deferred:
+  - capability-gated-imports (α2)
+  - content-addressed-imports (β)
+  - derivation-mutation (β)
+---
 
-> **scope:** import syntax, name resolution, content-addressed imports, derivation mutation  
-> **related:** [packages.md](packages.md) | [capabilities.md](capabilities.md)
+# imports
+
+ferrule uses a rust-like module system. files are modules, directories with `mod.fe` are submodules.
+
+## project structure
+
+| file | purpose |
+|------|---------|
+| `Package.fe` | package manifest (like cargo.toml) |
+| `ferrule.lock` | lockfile for dependencies |
+| `src/main.fe` | binary entrypoint |
+| `src/lib.fe` | library root (optional) |
+| `src/parser/mod.fe` | submodule definition |
+| `src/parser/lexer.fe` | file in submodule |
+| `tests/*.fe` | test files |
+
+directories with `mod.fe` become submodules. the module path matches the file path: `src/parser/lexer.fe` is `parser.lexer`.
+
+## visibility
+
+```ferrule
+function helper() { }              // default: module-private
+pub function process() { }         // public to package
+pub export function api() { }      // public to everyone (lib.fe only)
+```
+
+## local imports
+
+```ferrule
+// from local modules
+import parser { Parser, ParseError };  // from src/parser/mod.fe
+import utils { helper };               // from src/utils.fe
+
+// re-export
+pub import lexer { Token };  // re-export from lexer.fe
+```
 
 ---
 
-## Basic Import
+## basic import
 
 Import by name (resolved via `Package.fe` manifest and `ferrule.lock`):
 

@@ -1,291 +1,143 @@
-# Standard Library (α1 Surface)
-
-> **scope:** standard library APIs available in α1  
-> **related:** [../functions/effects.md](../functions/effects.md) | [../memory/regions.md](../memory/regions.md)
-
+---
+title: standard library
+status: α1
+implemented:
+  - basic-io
+  - result-maybe
+pending:
+  - file-system
+  - math
+  - text
+deferred:
+  - network (α2)
+  - concurrency (β)
+  - simd (β)
 ---
 
-## Overview
+# standard library
 
-The standard library provides essential functionality. All APIs return `ok`/`err` using the module's default error domain unless otherwise declared.
+the standard library is organized in layers. lower layers are always available, higher layers need explicit imports.
 
----
+## layer 1: intrinsics
 
-## Result & Error Handling
-
-### Sugar
-
-| Function | Purpose |
-|----------|---------|
-| `ok value` | wrap success |
-| `err Variant { ... }` | construct error |
-| `check expr` | unwrap or propagate |
-| `ensure cond else err ...` | guard clause |
-| `map_error expr using ...` | adapt error domain |
-
-See [../errors/propagation.md](../errors/propagation.md).
-
----
-
-## Capabilities
-
-Standard capabilities available to programs:
-
-| Capability | Effect | Purpose |
-|------------|--------|---------|
-| `Io` | `io` | stdin, stdout, stderr |
-| `Fs` | `fs` | file system operations |
-| `Net` | `net` | network operations |
-| `Clock` | `time` | time access, sleep |
-| `Rng` | `rng` | randomness |
-
-The entry point receives capabilities from the runtime:
+intrinsics are built into the compiler. they're accessed with `@` prefix, no import needed.
 
 ```ferrule
-function main(cap io: Io, cap fs: Fs, cap net: Net, cap clock: Clock) -> Unit {
-  // all authority flows from here
-}
+@sizeOf<T>()           // size in bytes
+@alignOf<T>()          // alignment
+@typeInfo<T>()         // type reflection
+@intToPtr<*T>(addr)    // address to pointer
+@ptrToInt(ptr)         // pointer to address
+@bitCast<T>(val)       // reinterpret bits
+@compileError(msg)     // compile-time error
 ```
 
----
+intrinsics are implemented directly in the compiler, generating llvm ir.
 
-## Regions & Views
+## layer 2: core (prelude)
 
-### Region Constructors
+core types are automatically in scope for all files. no import needed.
 
 ```ferrule
-region.heap()           // general-purpose region
-region.arena(bytes)     // bump allocator arena
-region.device(id)       // device memory region
-region.shared()         // thread-safe region
-region.current()        // current scope's region
+// primitives
+type Bool;
+type Char;
+type String;
+type Unit;
+type Never;
+
+// integers
+type i8, i16, i32, i64, i128;
+type u8, u16, u32, u64, u128, usize;
+
+// floats
+type f32, f64;
+
+// containers
+type Result<T, E>;
+type Maybe<T>;
+type Array<T, const N: usize>;
+type View<T>;
+type View<mut T>;
 ```
 
-### Region Operations
+## layer 3: std (explicit import)
+
+standard library modules. must be imported.
 
 ```ferrule
-region.dispose()        // free all allocations
-region.alloc<T>(count)  // allocate array
-region.alloc_zeroed<T>(count)
-region.alloc_uninit<T>(count)
+import std.io { println, print, stdin, stdout };
+import std.fs { File, readFile, writeFile };
+import std.text { format, split, join };
+import std.math { sin, cos, sqrt, PI };
+import std.mem { copy, zero };
+import std.collections { Vec, HashMap };
 ```
 
-### View Operations
+## layer 4: platform (explicit import)
+
+platform-specific apis.
 
 ```ferrule
-view.slice(v, start, count)   // sub-view
-view.copy(v, to = region)     // copy to region
-view.move(v, to = region)     // move to region
-view.pin(v)                   // pin for FFI
-view.unpin(pin)               // unpin
-view.assume_init(uninit)      // convert initialized view
-view.from_raw(ptr, len)       // create from raw pointer
+import std.os.linux { syscall, mmap };
+import std.os.windows { CreateFile };
+import std.embedded.arm { NVIC, SCB };
 ```
 
-See [../memory/regions.md](../memory/regions.md) and [../memory/views.md](../memory/views.md).
+## how it fits together
 
----
+user code calls stdlib functions. stdlib functions call runtime functions (implemented in zig). runtime functions call the os.
 
-## Tasks & Concurrency
+example flow for `println("hi")`:
+1. user calls `println("hi")`
+2. `std.io.println` receives the call
+3. `std.io.println` calls `rt_println(ptr, len)` (extern to zig)
+4. zig runtime's `rt_println` calls `write(STDOUT, ptr, len)`
 
-### Task Scope
+ferrule files define the api. zig runtime provides the implementation. intrinsics bridge the gap for low-level operations.
+
+## io
+
+requires `io` effect and `Io` capability.
 
 ```ferrule
-task.scope(scope => { ... })
-scope.spawn(async_op)
-scope.await_all()
-scope.await_one(task)
-scope.on_settle(task, callback)
-scope.fail(error)
-scope.collect_failure(error)
+io.println(message)     // print line to stdout
+io.print(message)       // print without newline
+io.eprintln(message)    // print to stderr
+io.read_line()          // read line from stdin
+io.flush()              // flush stdout
 ```
 
-### Cancellation
+## file system
+
+requires `fs` effect and `Fs` capability.
 
 ```ferrule
-cancel.token(deadline)
-token.is_cancelled()
+fs.open(path)           // open file
+fs.create(path)         // create file
+fs.read_all(file)       // read entire file
+fs.read_all_text(path)  // read as string
+fs.write_all(path, data)
+fs.exists(path)
+fs.remove(path)
+fs.mkdir(path)
+fs.read_dir(path)
 ```
 
-See [../concurrency/tasks.md](../concurrency/tasks.md).
-
----
-
-## Time
-
-Requires `time` effect and `Clock` capability.
+## text
 
 ```ferrule
-clock.now()                    // current time
-clock.sleep(duration)          // suspend
-Duration.seconds(n)
-Duration.ms(n)
-Duration.us(n)
-Duration.ns(n)
-time.until(deadline)           // duration until deadline
-```
-
----
-
-## Randomness
-
-Requires `rng` effect and `Rng` capability.
-
-```ferrule
-rng.u32()                      // random u32
-rng.u64()                      // random u64
-rng.range(min, max)            // random in range
-rng.bytes(view)                // fill view with random bytes
-rng.shuffle(view)              // shuffle elements
-```
-
----
-
-## Standard I/O
-
-Requires `io` effect and `Io` capability.
-
-### stdout
-
-```ferrule
-io.println(message)            // print line to stdout
-io.print(message)              // print without newline
-io.print_i32(value)            // print integer
-io.print_i64(value)            // print 64-bit integer
-io.print_f64(value)            // print float
-io.print_bool(value)           // print boolean
-io.flush()                     // flush stdout buffer
-```
-
-### stderr
-
-```ferrule
-io.eprintln(message)           // print line to stderr
-io.eprint(message)             // print to stderr without newline
-```
-
-### stdin
-
-```ferrule
-io.read_line()                 // read line from stdin -> String?
-io.read_all()                  // read all stdin -> Bytes
-io.read(buffer)                // read into buffer -> usize
-```
-
-### Example
-
-```ferrule
-function main(cap io: Io) -> Unit effects [io] {
-  io.println("What is your name?");
-  
-  const name = check io.read_line();
-  io.print("Hello, ");
-  io.print(name);
-  io.println("!");
-  
-  return ok Unit;
-}
-```
-
----
-
-## File System
-
-Requires `fs` effect and `Fs` capability.
-
-```ferrule
-fs.open(path)                  // open file
-fs.create(path)                // create file
-fs.read_all(file)              // read entire file
-fs.read_all_text(path)         // read as string
-fs.write_all(path, data)       // write data
-fs.exists(path)                // check existence
-fs.stat(path)                  // file metadata
-fs.remove(path)                // delete file
-fs.mkdir(path)                 // create directory
-fs.read_dir(path)              // list directory
-```
-
----
-
-## Network
-
-Requires `net` effect and `Net` capability.
-
-```ferrule
-net.connect(host, port, token) // TCP connect
-net.listen(addr)               // TCP listen
-net.accept(listener)           // accept connection
-sock.read(buf)                 // read from socket
-sock.write(data)               // write to socket
-sock.close()                   // close socket
-```
-
----
-
-## Layout
-
-```ferrule
-layout.sizeof<T>()             // size in bytes
-layout.alignof<T>()            // alignment
-layout.page_size()             // system page size
-layout.cache_line_size()       // cache line size
-```
-
----
-
-## SIMD
-
-Requires `simd` effect.
-
-```ferrule
-simd.add(a, b)                 // element-wise add
-simd.sub(a, b)                 // element-wise subtract
-simd.mul(a, b)                 // element-wise multiply
-simd.div(a, b)                 // element-wise divide
-simd.mul_scalar(v, s)          // scalar multiply
-simd.reduce_add(v)             // sum elements
-simd.reduce_min(v)             // minimum element
-simd.reduce_max(v)             // maximum element
-simd.load<T, n>(view, offset)  // load vector
-simd.store(view, offset, vec)  // store vector
-simd.gt(a, b)                  // greater-than mask
-simd.lt(a, b)                  // less-than mask
-simd.select(mask, a, b)        // conditional select
-```
-
----
-
-## Text
-
-```ferrule
-text.trim(s)                   // trim whitespace
-text.split(s, delim)           // split string
-text.join(parts, sep)          // join strings
-text.contains(s, substr)       // check substring
+text.trim(s)
+text.split(s, delim)
+text.join(parts, sep)
+text.contains(s, substr)
 text.starts_with(s, prefix)
 text.ends_with(s, suffix)
 text.to_upper(s)
 text.to_lower(s)
 ```
 
----
-
-## Numbers
-
-```ferrule
-number.parse_i32(s)            // parse integer
-number.parse_u32(s)
-number.parse_i64(s)
-number.parse_u64(s)
-number.parse_f32(s)
-number.parse_f64(s)
-number.to_string(n)            // format number
-```
-
----
-
-## Math
+## math
 
 ```ferrule
 math.abs(x)
@@ -296,7 +148,6 @@ math.sqrt(x)
 math.pow(base, exp)
 math.sin(x)
 math.cos(x)
-math.tan(x)
 math.floor(x)
 math.ceil(x)
 math.round(x)
@@ -304,43 +155,152 @@ math.PI
 math.E
 ```
 
----
-
-## Memory
+## memory
 
 ```ferrule
-mem.copy(dst, src)             // copy bytes
-mem.set(dst, value)            // fill with value
-mem.secure_zero(view)          // secure zeroing (not optimized away)
-mem.compare(a, b)              // compare bytes
+mem.copy(dst, src)
+mem.set(dst, value)
+mem.secure_zero(view)   // not optimized away
+mem.compare(a, b)
 ```
 
----
-
-## Builder
+## layout
 
 ```ferrule
-builder.new<T>(region)         // create builder
-builder.push(b, value)         // append value
-builder.finish(b)              // finalize to view
-builder.len(b)                 // current length
-builder.capacity(b)            // current capacity
+layout.sizeof<T>()
+layout.alignof<T>()
+layout.page_size()
+layout.cache_line_size()
 ```
 
----
+## embedded support
 
-## Testing
+for embedded/bare metal, skip the runtime:
 
 ```ferrule
-testing.mock_clock(start)      // deterministic clock
-testing.mock_rng(seed)         // deterministic RNG
-testing.deterministic_scheduler(seed)
-testing.explore_interleavings(max_runs, fn)
-assert(condition)
-assert_eq(a, b)
-assert_ne(a, b)
+#![no_std]
+#![no_runtime]
+
+// no stdlib imports available
+// must use intrinsics directly
+
+const UART: *volatile u32 = @intToPtr(*volatile u32, 0x4000_0000);
+
+function uart_write(byte: u8) -> Unit {
+    unsafe {
+        UART.* = @as(u32, byte);
+    }
+}
+
+function main() -> Never {
+    uart_write('H');
+    loop {}
+}
 ```
 
-See [../concurrency/determinism.md](../concurrency/determinism.md).
+## statics
 
+for global state:
 
+```ferrule
+static BUFFER: Array<u8, 1024> = [0; 1024];
+static CONFIG: Config = Config { baud: 9600 };
+
+// mutable statics require unsafe
+static mut COUNTER: u32 = 0;
+
+unsafe {
+    COUNTER = COUNTER + 1;
+}
+```
+
+## extern structs
+
+for c-compatible layout:
+
+```ferrule
+type CHeader = extern {
+    magic: u32,
+    version: u16,
+    flags: u16,
+};
+```
+
+## packed structs
+
+for bit-level layout:
+
+```ferrule
+type NetworkHeader = packed {
+    version: u4,
+    ihl: u4,
+    dscp: u6,
+    ecn: u2,
+};
+```
+
+## volatile
+
+for memory-mapped io:
+
+```ferrule
+type UartRegisters = extern {
+    data: volatile u32,
+    status: volatile u32,
+    control: volatile u32,
+};
+```
+
+## what's planned
+
+**network** (α2):
+```ferrule
+net.connect(host, port)
+net.listen(addr)
+sock.read(buf)
+sock.write(data)
+```
+
+**time** (α2):
+```ferrule
+clock.now()
+clock.sleep(duration)
+Duration.seconds(n)
+Duration.ms(n)
+```
+
+**randomness** (α2):
+```ferrule
+rng.u32()
+rng.range(min, max)
+rng.bytes(view)
+```
+
+**testing** (α2):
+```ferrule
+test "description" {
+    assert_eq(result, expected);
+}
+```
+
+**simd** (β):
+```ferrule
+simd.add(a, b)
+simd.mul(a, b)
+simd.reduce_add(v)
+```
+
+## stdlib structure
+
+| path | purpose |
+|------|---------|
+| `stdlib/core/prelude.fe` | auto-imported types |
+| `stdlib/core/intrinsics.fe` | wrappers around @builtins |
+| `stdlib/std/io.fe` | i/o operations |
+| `stdlib/std/fs.fe` | file system |
+| `stdlib/std/text.fe` | string manipulation |
+| `stdlib/std/math.fe` | math functions |
+| `stdlib/std/mem.fe` | memory operations |
+| `stdlib/std/collections/vec.fe` | vector type |
+| `stdlib/std/collections/hashmap.fe` | hash map type |
+| `stdlib/runtime/runtime.zig` | zig runtime support |

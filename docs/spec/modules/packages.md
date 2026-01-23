@@ -1,7 +1,18 @@
-# Packages
+---
+title: packages
+status: α1
+implemented: []
+pending:
+  - package-declaration
+  - project-structure
+deferred:
+  - deps-fe (α2)
+  - build-fe (α2)
+  - content-addressing (β)
+  - ferrule-lock (β)
+---
 
-> **scope:** package declarations, content addressing, deps.fe format, build.fe  
-> **related:** [imports.md](imports.md) | [capabilities.md](capabilities.md) | [../package-management.md](../package-management.md)
+# packages
 
 ---
 
@@ -17,16 +28,14 @@ The **content address** (hash of source + derivation) is computed by build tools
 
 ---
 
-## Project Structure
+## project structure
 
-```
-my-project/
-├── deps.fe         # dependencies (CLI-editable, restricted format)
-├── build.fe        # build configuration (full Ferrule code, optional)
-├── ferrule.lock    # locked content addresses
-└── src/
-    └── main.fe
-```
+| file | purpose |
+|------|---------|
+| `deps.fe` | dependencies (cli-editable, restricted format) |
+| `build.fe` | build configuration (full ferrule code, optional) |
+| `ferrule.lock` | locked content addresses |
+| `src/main.fe` | application entrypoint |
 
 ---
 

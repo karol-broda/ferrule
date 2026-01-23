@@ -1,7 +1,18 @@
-# Grammar (EBNF)
+---
+title: grammar
+status: α1
+implemented:
+  - lexical-grammar
+  - expression-grammar
+  - statement-grammar
+  - type-grammar
+pending:
+  - effect-grammar
+  - pattern-grammar
+deferred: []
+---
 
-> **scope:** complete EBNF grammar for Ferrule α1  
-> **related:** [keywords.md](keywords.md) | [operators.md](operators.md)
+# grammar (ebnf)
 
 ---
 
@@ -19,7 +30,7 @@
 
 ## Lexical
 
-```ebnf
+```
 Identifier   := Letter { Letter | Digit | "_" }
 Letter       := /* unicode letter or _ */
 Digit        := "0"…"9"
@@ -42,7 +53,7 @@ Comment      := "//" { any }* newline
 
 ## Module Structure
 
-```ebnf
+```
 Module       := PackageDecl { ImportDecl }* { TopDecl }*
 
 PackageDecl  := "package" QualifiedName ";"
@@ -66,13 +77,21 @@ Setting      := Identifier ":" Value
 
 ## Top-Level Declarations
 
-```ebnf
+```
 TopDecl      := TypeDecl 
              | ErrorDecl
              | DomainDecl 
              | FunctionDecl 
              | ConstDecl
              | UseDecl
+             | TestDecl
+             | ImplDecl
+
+/* α2: test blocks */
+TestDecl     := "test" StringLit Block
+
+/* α2: impl sugar */
+ImplDecl     := "impl" Identifier "<" TypeExpr ">" "{" FieldAssignments "}"
 
 TypeDecl     := "type" Identifier { "<" TypeParams ">" }? "=" TypeExpr ";"
 
@@ -95,9 +114,10 @@ UseDecl      := "use" "error" Identifier ";"
 
 ## Functions
 
-```ebnf
+```
 FunctionDecl := { "export" { "c" | "wasm" }? }?
                 { "pub" }?
+                { "unsafe" }?
                 "function" Identifier 
                 { "<" TypeParams ">" }?
                 "(" ParamList? ")" 
@@ -105,10 +125,15 @@ FunctionDecl := { "export" { "c" | "wasm" }? }?
                 { "error" ErrorType }?
                 { "effects" "[" EffectList? "]" }?
                 { WhereClause }?
+                { WithCapClause }?
                 Block
 
+WithCapClause := "with" CapList
+CapList       := CapItem { "," CapItem }*
+CapItem       := "cap" Identifier ":" TypeExpr
+
 ParamList    := Param { "," Param }*
-Param        := { "cap" }? { "inout" }? Identifier ":" TypeExpr
+Param        := { "cap" { "move" }? }? { "inout" }? Identifier ":" TypeExpr
 
 EffectList   := EffectItem { "," EffectItem }*
 EffectItem   := Identifier | "..." | "..." Identifier
@@ -132,7 +157,7 @@ TypeParam    := { "in" | "out" }? Identifier { ":" TypeConstraint }?
 
 ## Type Expressions
 
-```ebnf
+```
 TypeExpr     := SimpleType { TypeOp }*
 
 SimpleType   := Identifier { "<" TypeArgs ">" }?
@@ -178,7 +203,7 @@ ViewType     := "View" "<" { "mut" }? TypeExpr ">"
 
 ## Statements
 
-```ebnf
+```
 Block        := "{" { Statement }* "}"
 
 Statement    := ConstDecl
@@ -195,7 +220,10 @@ Statement    := ConstDecl
              | Return
              | Defer
              | ContextBlock
+             | UnsafeBlock
              | Expr ";"
+
+UnsafeBlock  := "unsafe" Block
 
 LocalConstDecl := "const" Identifier { ":" TypeExpr }? "=" Expr ";"
 VarDecl      := "var" Identifier ":" TypeExpr "=" Expr ";"
@@ -223,7 +251,7 @@ Case         := Pattern { "where" Expr }? "->" Expr ";"
 
 ## Patterns
 
-```ebnf
+```
 Pattern      := OrPattern
 
 OrPattern    := NamedPattern { "|" NamedPattern }*
@@ -262,7 +290,7 @@ PatternField  := Identifier { ":" Pattern }?
 
 ## Expressions
 
-```ebnf
+```
 Expr         := Primary { Postfix | InfixOp Primary }*
 
 Primary      := Literal
@@ -276,8 +304,9 @@ Primary      := Literal
              | "ensure" Expr "else" "err" Identifier "{" FieldAssignments "}"
              | "map_error" Expr "using" "(" Identifier "=>" Expr ")"
              | "comptime" Expr
-             | "unsafe_cast" "<" TypeExpr ">" "(" Expr ")"
+             | "transmute" "<" TypeExpr "," TypeExpr ">" "(" Expr ")"
              | AsmExpr
+             | TaskScope
 
 AnonFunction := "function" "(" ParamList? ")" "->" TypeExpr Block
 
@@ -309,7 +338,7 @@ RecordLit    := "{" FieldAssignments "}"
 
 ## Inline Assembly
 
-```ebnf
+```
 AsmExpr      := "asm" Identifier            /* target */
                 "in" "{" AsmBindings "}"
                 "out" "{" AsmBindings "}"
@@ -327,7 +356,7 @@ ClobberList  := { Identifier { "," Identifier }* }?
 
 ## Operators (by precedence, low to high)
 
-```ebnf
+```
 InfixOp      := "||"                        /* logical or */
              | "&&"                         /* logical and */
              | "==" | "!="                  /* equality (single ==, no ===) */
@@ -342,4 +371,4 @@ InfixOp      := "||"                        /* logical or */
 PrefixOp     := "!" | "-" | "~"
 ```
 
-**Note:** Ferrule uses `==` for equality (not `===`). See [operators.md](operators.md) for detailed precedence table.
+**Note:** Ferrule uses `==` for equality (not `===`). See [operators.md](/docs/operators) for detailed precedence table.

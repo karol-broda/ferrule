@@ -1,7 +1,18 @@
-# Deterministic Scheduling & Testing
+---
+title: deterministic scheduling
+status: β
+implemented: []
+pending: []
+deferred:
+  - mock-clock
+  - mock-rng
+  - deterministic-scheduler
+  - interleaving-exploration
+---
 
-> **scope:** test schedulers, time/rng stubs, reproducible interleavings  
-> **related:** [tasks.md](tasks.md) | [../modules/capabilities.md](../modules/capabilities.md)
+# deterministic scheduling and testing
+
+> this feature is planned for β. the spec describes what it will be, not what's implemented now.
 
 ---
 

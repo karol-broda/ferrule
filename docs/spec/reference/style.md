@@ -1,7 +1,9 @@
-# Style & Naming Guidelines
+---
+title: style and naming
+status: α1
+---
 
-> **scope:** naming conventions, formatting, security practices  
-> **related:** [../core/declarations.md](../core/declarations.md)
+# style and naming guidelines
 
 ---
 

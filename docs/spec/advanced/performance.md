@@ -1,7 +1,17 @@
-# Data-Oriented Performance
+---
+title: performance
+status: rfc
+implemented: []
+pending: []
+deferred:
+  - shapers
+  - prefetch-hints
+  - cache-optimization
+---
 
-> **scope:** shapers, SIMD types, prefetch hints, cache optimization  
-> **related:** [../memory/views.md](../memory/views.md) | [../functions/effects.md](../functions/effects.md)
+# data-oriented performance
+
+> this feature is an rfc. the spec describes what it might be, not what's committed.
 
 ---
 

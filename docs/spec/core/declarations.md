@@ -1,128 +1,220 @@
-# Declarations & Bindings
-
-> **scope:** `const`, `var`, `inout` — immutability rules, by-reference parameters, type inference  
-> **related:** [types.md](types.md) | [../functions/syntax.md](../functions/syntax.md)
-
+---
+title: declarations and bindings
+status: α1
+implemented:
+  - const-bindings
+  - var-bindings
+  - inout-parameters
+  - type-inference
+  - no-implicit-coercion
+pending:
+  - move-on-assignment
+  - use-after-move-errors
+deferred:
+  - region-allocation-syntax (α2)
 ---
 
-## Immutability by Default
+# declarations and bindings
 
-The default binding is `const` (immutable):
+this covers how you declare variables and what happens when you assign them.
+
+## immutability by default
+
+the default binding is `const`:
 
 ```ferrule
 const pageSize: usize = layout.page_size();
 ```
 
----
+const bindings can't be reassigned. this is the common case and should be your default.
 
-## Mutable Bindings
+## mutable bindings
 
-Use `var` for mutable bindings:
+use `var` when you need mutation:
 
 ```ferrule
 var counter: u32 = 0;
 counter = counter + 1;
 ```
 
----
+## type inference
 
-## Type Inference Rules
-
-### Unambiguous Literals — Inference Allowed
+ferrule infers types when unambiguous:
 
 ```ferrule
-const x = 42;        // OK: i32 (default integer)
-const y = 3.14;      // OK: f64 (default float)
-const s = "hello";   // OK: String
-const b = true;      // OK: Bool
+const x = 42;        // i32 (default integer)
+const y = 3.14;      // f64 (default float)
+const s = "hello";   // String
+const b = true;      // Bool
 ```
 
-### Ambiguous or Non-Default — Annotation Required
+annotation required when ambiguous or non-default:
 
 ```ferrule
-const port: u16 = 8080;      // 8080 could be many int types
+const port: u16 = 8080;      // could be many int types
 const ratio: f32 = 3.14;     // need f32 not f64
 const items: Vec<User> = vec.new();  // empty collection needs type
 ```
 
-### Function Results — Annotation Required
+function results always need annotation:
 
 ```ferrule
-const result = compute();       // ERROR: cannot infer, annotate
-const result: Data = compute(); // OK: explicit type
+const result = compute();       // error: can't infer, annotate
+const result: Data = compute(); // ok
 ```
 
-### Literal Type Preservation
+## literal type preservation
 
 `const` preserves literal types, `var` widens:
 
 ```ferrule
-const x = 42;     // type is i32 literal 42
-var y = 42;       // type is i32 (widened, because mutable)
+const x = 42;     // type is literal 42
+var y = 42;       // type is i32 (widened)
 ```
 
----
+this matters for const generics and refinement types.
 
-## No Implicit Coercion
+## no implicit coercion
 
-Ferrule **never** converts types implicitly:
+ferrule never converts types implicitly:
 
 ```ferrule
 const a: u16 = 100;
-const b: u32 = a;       // ERROR: u16 is not u32
+const b: u32 = a;       // error: u16 is not u32
 
-const b: u32 = u32(a);  // OK: explicit conversion
+const b: u32 = u32(a);  // ok: explicit conversion
 ```
 
-This applies to all conversions:
-- No int → float
-- No narrowing (i32 → i16)
-- No widening (i16 → i32)
-- No bool coercion
-- No null coercion
+this applies to everything:
+- no int to float
+- no narrowing (i32 to i16)
+- no widening (i16 to i32)
+- no bool coercion
+- no null coercion
 
----
+## move semantics
 
-## By-Reference Parameters
+when you assign a move type, ownership transfers:
 
-Use `inout` for by-reference mutation in function parameters:
+```ferrule
+const s: String = "hello";
+const t = s;      // s is moved to t
+// s is now invalid
+```
+
+this is not a copy. the data isn't duplicated. `s` becomes unusable after the assignment.
+
+for copy types, assignment duplicates:
+
+```ferrule
+const a: i32 = 42;
+const b = a;      // a is copied to b
+// both a and b are valid
+```
+
+see [types.md](types#copy-vs-move-types) for which types are copy vs move.
+
+## use after move
+
+using a moved value is a compile error:
+
+```ferrule
+const data: String = "hello";
+const other = data;  // move
+
+println(data);  // error: data was moved
+```
+
+the compiler tracks which variables have been moved and errors if you try to use them.
+
+## conditional moves
+
+if a value might be moved in one branch, it's invalid after the conditional:
+
+```ferrule
+const data: String = "hello";
+
+if condition {
+    consume(data);  // moves data
+}
+
+use_data(data);  // error: data might have been moved
+```
+
+the safe pattern is to move in all branches:
+
+```ferrule
+const data: String = "hello";
+
+if condition {
+    consume(data);
+} else {
+    other_consume(data);
+}
+// data is invalid on all paths, which is fine
+```
+
+## loop moves
+
+you can't move the same variable in a loop:
+
+```ferrule
+const data: String = "hello";
+
+for i in 0..3 {
+    process(data);  // error: can't move in loop
+}
+```
+
+use clone if you need to pass owned data in each iteration:
+
+```ferrule
+for i in 0..3 {
+    process(data.clone());  // explicit copy each time
+}
+```
+
+## by-reference parameters
+
+use `inout` for by-reference mutation:
 
 ```ferrule
 function bump(inout x: u32) -> Unit { 
   x = x + 1; 
 }
+
+var counter: u32 = 0;
+bump(inout counter);
+// counter is now 1
 ```
 
-**Rules:**
+rules:
 - `inout` is only valid on function parameters
-- No hidden aliasing — the reference is explicit
-- Callers must pass mutable bindings
+- callers must pass mutable bindings
+- the mutation is visible to the caller
 
----
+## destructuring
 
-## Region Allocation Example
+you can destructure records and arrays:
 
 ```ferrule
-const heap: Region = region.heap();
-const buf: View<mut u8> = heap.alloc<u8>(4096);
-defer heap.dispose();
+const User { name, age } = user;  // moves both fields out
+// user is now fully invalid
+
+const [first, second, ...rest] = items;  // array destructuring
 ```
 
-See [../memory/regions.md](../memory/regions.md) for region semantics.
+partial moves (moving just one field) are not allowed. if you need one field, destructure the whole thing.
 
----
+## summary
 
-## Summary
-
-| Keyword | Meaning |
+| keyword | meaning |
 |---------|---------|
-| `const` | immutable binding (default), preserves literal types |
+| `const` | immutable binding, preserves literal types |
 | `var` | mutable binding, widens literal types |
-| `inout` | by-reference parameter (mutation visible to caller) |
+| `inout` | by-reference parameter |
 
-| Inference | Rule |
-|-----------|------|
-| Unambiguous literals | Allowed (defaults to i32/f64/String/Bool) |
-| Ambiguous types | Annotation required |
-| Function call results | Annotation required |
-| Non-default types | Annotation required |
+| assignment | behavior |
+|------------|----------|
+| copy type | duplicates value, both valid |
+| move type | transfers ownership, original invalid |

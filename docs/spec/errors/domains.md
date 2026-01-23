@@ -1,19 +1,24 @@
-# Error Domains
-
-> **scope:** standalone error types, error domains, composition, Pick/Omit  
-> **related:** [propagation.md](propagation.md) | [../functions/syntax.md](../functions/syntax.md)
-
+---
+title: error domains
+status: α1
+implemented:
+  - standalone-error-types
+  - domain-syntax
+pending:
+  - domain-composition
+  - use-error-default
+deferred:
+  - pick-omit (α2)
+  - inline-error-unions (α2)
 ---
 
-## Overview
+# error domains
 
-Ferrule uses **errors as values** — no exceptions, no implicit panics. Errors can be defined as standalone types or grouped into domains.
+ferrule uses errors as values. no exceptions, no implicit panics. errors are types you define and return.
 
----
+## standalone error types
 
-## Standalone Error Types
-
-Define error types outside of domains:
+define error types outside of domains:
 
 ```ferrule
 error NotFound { path: Path }
@@ -22,31 +27,29 @@ error Timeout { ms: u64 }
 error ParseFailed { line: u32, message: String }
 ```
 
-Standalone errors can be:
-- Used directly in function signatures
-- Combined into domains
-- Reused across multiple domains
+standalone errors can be:
+- used directly in function signatures
+- combined into domains
+- reused across multiple domains
 
----
+## domains
 
-## Error Domains
+domains group related errors into a union. two syntaxes:
 
-Domains group related errors. There are two syntaxes:
+### union syntax (preferred)
 
-### Union Syntax (Preferred)
-
-Reference standalone error types by name:
+reference standalone error types by name:
 
 ```ferrule
 domain IoError = NotFound | Denied | Timeout;
 domain ParseError = ParseFailed | UnexpectedToken;
 ```
 
-This is the **preferred** syntax when errors are reused across multiple domains.
+use this when errors are reused across multiple domains.
 
-### Inline Variant Syntax
+### inline variant syntax
 
-Define error variants directly within the domain:
+define error variants directly:
 
 ```ferrule
 domain IoError {
@@ -56,15 +59,11 @@ domain IoError {
 }
 ```
 
-Use this syntax for domain-specific errors that won't be reused.
+use this for domain-specific errors that won't be reused.
 
-Both syntaxes create **unions of error types**.
+## domain composition
 
----
-
-## Domain Composition
-
-Compose domains using union syntax:
+compose domains using union syntax:
 
 ```ferrule
 // standalone errors
@@ -73,12 +72,11 @@ error Denied { path: Path }
 error Timeout { ms: u64 }
 error ConnectionRefused { host: String }
 error ParseFailed { line: u32 }
-error UnexpectedToken { token: String }
 
 // domains as unions
 domain IoError = NotFound | Denied;
 domain NetError = Timeout | ConnectionRefused;
-domain ParseError = ParseFailed | UnexpectedToken;
+domain ParseError = ParseFailed;
 
 // union of domains
 domain AppError = IoError | NetError | ParseError;
@@ -87,68 +85,24 @@ domain AppError = IoError | NetError | ParseError;
 domain ExtendedIoError = IoError | PermissionError;
 ```
 
----
+## module default error
 
-## Pick and Omit
-
-Extract subsets of errors from domains:
-
-### Pick
-
-Select specific errors:
-
-```ferrule
-domain IoError = NotFound | Denied | Timeout;
-
-// only NotFound and Denied
-type ReadErrors = Pick<IoError, NotFound | Denied>;
-```
-
-### Omit
-
-Exclude specific errors:
-
-```ferrule
-// everything except Timeout
-type FastIoError = Omit<IoError, Timeout>;
-```
-
-### Usage in Signatures
-
-```ferrule
-// function can only return specific errors
-function quickRead(path: Path, cap fs: Fs) -> Bytes error Pick<IoError, NotFound | Denied> effects [fs] {
-  // cannot return Timeout
-}
-
-// function excludes certain errors
-function fastOp() -> Data error Omit<AppError, Timeout> {
-  // guaranteed not to timeout
-}
-```
-
----
-
-## Module Default Error
-
-Use `use error` to set a default error domain for the module:
+use `use error` to set a default error domain for the module:
 
 ```ferrule
 use error IoError;
 
 // functions in this module default to error IoError
-function readFile(p: Path) -> Bytes effects [fs] {
+function readFile(p: Path, cap fs: Fs) -> Bytes effects [fs] {
   // implicitly: error IoError
 }
 ```
 
-**Public/ABI exports must be explicit** about their error domain regardless of module defaults.
+public exports must be explicit about their error domain regardless of module defaults.
 
----
+## precise error signatures
 
-## Precise Error Signatures
-
-Use specific errors instead of full domains when appropriate:
+use specific errors instead of full domains when appropriate:
 
 ```ferrule
 // full domain
@@ -158,30 +112,9 @@ function process(input: Input) -> Output error AppError { ... }
 function validate(input: Input) -> Output error (ParseFailed | InvalidFormat) { ... }
 ```
 
----
+this helps callers know exactly what can fail.
 
-## Error Type Declaration Syntax
-
-```ferrule
-// simple error (no fields)
-error ConnectionRefused;
-
-// error with fields
-error NotFound { 
-  path: Path 
-}
-
-// error with multiple fields
-error ValidationError { 
-  field: String,
-  message: String,
-  code: u32 
-}
-```
-
----
-
-## Example: Full Error Hierarchy
+## complete example
 
 ```ferrule
 // standalone error types
@@ -190,12 +123,11 @@ error Denied { path: Path }
 error Timeout { ms: u64, operation: String }
 error ConnectionRefused { host: String, port: u16 }
 error ParseFailed { line: u32, column: u32, message: String }
-error InvalidFormat { expected: String, actual: String }
 
 // group into domains
 domain IoError = NotFound | Denied | Timeout;
 domain NetError = Timeout | ConnectionRefused;
-domain ParseError = ParseFailed | InvalidFormat;
+domain ParseError = ParseFailed;
 
 // compose domains
 domain AppError = IoError | NetError | ParseError;
@@ -213,31 +145,25 @@ function readOnly(path: Path, cap fs: Fs) -> Bytes error (NotFound | Denied) eff
 }
 ```
 
----
+## what's planned
 
-## Inline Error Unions
-
-Define error unions inline without creating a domain:
+**pick/omit** (α2) for extracting subsets:
 
 ```ferrule
-function tryBoth(a: Path, b: Url, cap fs: Fs, cap net: Net) 
-  -> Data error (IoError | NetError) effects [fs, net] 
-{
-  // can return errors from either domain
-}
+// only NotFound and Denied
+type ReadErrors = Pick<IoError, NotFound | Denied>;
+
+// everything except Timeout
+type FastIoError = Omit<IoError, Timeout>;
 ```
 
----
+## summary
 
-## Summary
-
-| Syntax | Purpose |
+| syntax | purpose |
 |--------|---------|
-| `error Name { fields }` | Standalone error type |
-| `domain D = E1 \| E2;` | Domain as union of errors (preferred) |
-| `domain D { E1 { } E2 { } }` | Domain with inline variants |
-| `domain D = D1 \| D2;` | Compose domains |
-| `Pick<D, E1 \| E2>` | Select errors from domain |
-| `Omit<D, E1>` | Exclude errors from domain |
-| `error (E1 \| E2)` | Inline error union in signatures |
-| `use error D;` | Module default domain |
+| `error Name { fields }` | standalone error type |
+| `domain D = E1 \| E2;` | domain as union (preferred) |
+| `domain D { E1 { } E2 { } }` | domain with inline variants |
+| `domain D = D1 \| D2;` | compose domains |
+| `error (E1 \| E2)` | inline error union in signatures |
+| `use error D;` | module default domain |

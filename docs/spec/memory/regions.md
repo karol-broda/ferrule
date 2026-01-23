@@ -1,119 +1,130 @@
-# Regions
-
-> **scope:** region kinds, creation, disposal, transfer, allocators  
-> **related:** [views.md](views.md) | [capsules.md](capsules.md) | [../functions/effects.md](../functions/effects.md)
-
+---
+title: regions
+status: α2
+implemented: []
+pending: []
+deferred:
+  - heap-region
+  - arena-region
+  - device-region
+  - shared-region
+  - region-disposal
+  - uninitialized-memory
 ---
 
-## Overview
+# regions
 
-- **regions** group allocations under a single lifetime
-- disposing a region frees everything inside it **deterministically**
-- there is **no garbage collector** — all lifetimes are either lexical (via `defer`) or explicit (via capsule finalizers)
-- each call to `region.heap()` creates a **new independent region** — there is no global singleton heap
+> this feature is planned for α2. the spec describes what it will be, not what's implemented now.
 
----
+regions group allocations under a single lifetime. disposing a region frees everything inside it deterministically. there's no garbage collector.
 
-## Region Kinds (α1)
+## why regions
 
-| Constructor | Description |
+traditional memory management has two extremes:
+- manual (c): free each allocation individually, easy to mess up
+- gc (go, java): automatic but unpredictable, can't control when memory is freed
+
+regions are a middle ground:
+- allocate into a region
+- when done, dispose the whole region
+- everything inside is freed at once
+
+this is particularly good for request-scoped data. allocate all the request's memory in one region, dispose when the request finishes.
+
+## region kinds
+
+| constructor | description |
 |-------------|-------------|
 | `region.heap()` | general-purpose dynamic region |
-| `region.arena(bytes)` | bump-ptr arena; individual frees are disallowed |
-| `region.device(id)` | memory associated with a device (DMA, GPU) |
-| `region.shared()` | multiple threads may access; requires `atomics` for mutation |
+| `region.arena(bytes)` | bump-ptr arena, no individual frees |
+| `region.device(id)` | device memory (dma, gpu) |
+| `region.shared()` | multi-thread access, requires atomics |
 
-> Regions are values; they can be passed, stored, and disposed.
+each call to `region.heap()` creates a new independent region. there's no global singleton heap.
+
+## creation and disposal
 
 ```ferrule
-const arena = region.arena(1 << 20);
-const buf: View<mut u8> = arena.alloc<u8>(4096);
+const arena = region.arena(1 << 20);  // 1mb
 defer arena.dispose();
+
+const buf: View<mut u8> = arena.alloc<u8>(4096);
+// use buf...
+// arena disposed when scope exits
 ```
 
----
+disposal:
+- frees all allocations in the region
+- runs destructors for capsule values registered with the region
+- returns Unit, never fails
+- errors during finalization are logged but don't propagate
 
-## Creation
+disposing a region invalidates all views bound to it. further access traps.
 
-### Heap Region
+## arenas
+
+arenas are bump allocators. allocation is fast (just increment a pointer), but you can't free individual allocations:
+
+```ferrule
+const arena = region.arena(1024 * 1024);  // 1mb
+defer arena.dispose();
+
+const a = arena.alloc<u8>(100);   // fast
+const b = arena.alloc<u8>(200);   // fast
+// can't free a or b individually
+// dispose frees everything at once
+```
+
+arenas are great for:
+- parsing (allocate ast nodes, dispose when done)
+- request handling (allocate everything, dispose when request finishes)
+- game frames (allocate per-frame data, reset each frame)
+
+## heap regions
+
+heap regions allow individual frees but are slower:
 
 ```ferrule
 const heap = region.heap();
 defer heap.dispose();
+
+const ptr = heap.alloc<u8>(100);
+// can use heap.free(ptr) for individual frees
+// or let dispose clean everything
 ```
 
-### Arena Region
+## transfer between regions
 
-```ferrule
-const arena = region.arena(1024 * 1024);  // 1MB
-defer arena.dispose();
-```
-
-### Current Region
-
-`region.current()` returns the region implicitly associated with the current lexical scope created by tooling (`task.scope`, test harnesses, etc.).
-
-α1 **does not** auto-nest regions; you explicitly pass regions to APIs that allocate.
-
----
-
-## Disposal
-
-`region.dispose()`:
-- logically frees all allocations in the region
-- runs deterministic **destructors** for capsule values registered with the region
-- returns `Unit` — **never fails**
-- errors during finalization are logged but don't propagate
-
-```ferrule
-const r = region.arena(1024);
-defer r.dispose();
-// all allocations freed when scope exits
-```
-
-Disposing a region **invalidates** all views bound to it; further access traps.
-
-> Finalizer errors are logged to the debugging/observability subsystem but do not affect control flow.
-
----
-
-## Transfer (Reparenting)
-
-Move between regions is explicit and **deep** for trivially movable types:
+moving data between regions is explicit:
 
 ```ferrule
 const dst = region.heap();
 const moved: View<mut u8> = view.move(buf, to = dst);
 ```
 
-### Rules
+moving invalidates the source view. using it after transfer is a compile error.
 
-1. Moving **invalidates** the source view; using it after transfer is a compile-time error (or runtime trap in dynamic paths)
-2. Types with **external attachments** (file handles, device memory, host pointers) must define a `move_into(to: Region)` policy; if absent, moves are rejected
-3. Moving into `region.device` requires a device-visible layout; otherwise rejected or performed via a layout adapter
-
-### Copy vs Move
-
-| Operation | Source After | Requirement |
+| operation | source after | requirement |
 |-----------|--------------|-------------|
 | `view.copy(src, to)` | remains valid | element type is copyable |
 | `view.move(src, to)` | invalidated | element type has valid move policy |
 
----
+## shared regions
 
-## Shared Regions
-
-Memory in `region.shared()` may be accessed from multiple tasks/threads. Mutation requires:
+memory in `region.shared()` may be accessed from multiple threads. mutation requires:
 - `atomics` effect
-- atomic types or synchronization primitives from stdlib
+- atomic types or synchronization primitives
 
-> Non-atomic concurrent mutation of overlapping ranges is **undefined behavior**.
+```ferrule
+const shared = region.shared();
+// use with atomic operations only
+```
 
----
+non-atomic concurrent mutation is undefined behavior.
 
-## Allocators & `alloc` Effect
+## alloc effect
 
-Standard allocators operate **within a region**; invoking them requires the `alloc` effect:
+invoking allocators requires the `alloc` effect:
 
 ```ferrule
 function grow_buffer(r: Region, want: usize) -> View<mut u8> effects [alloc] {
@@ -121,22 +132,18 @@ function grow_buffer(r: Region, want: usize) -> View<mut u8> effects [alloc] {
 }
 ```
 
-Custom allocators can be passed as capabilities to further constrain policies (e.g., arenas that forbid free).
+this makes allocation visible in function signatures.
 
----
+## uninitialized memory
 
-## Uninitialized Memory
+ferrule forbids reading uninitialized memory. allocation apis define zero-init policy:
 
-α1 **forbids reading from uninitialized memory**.
-
-Allocation APIs define zero-init policy explicitly:
-
-| API | Behavior |
+| api | behavior |
 |-----|----------|
 | `alloc_zeroed<T>(...)` | returns zeroed memory |
 | `alloc_uninit<T>(...)` | returns `View<Uninit<T>>` |
 
-Uninitialized views must be **fully initialized** before transmuting:
+uninitialized views must be fully initialized before use:
 
 ```ferrule
 const un: View<Uninit<u32>> = region.heap().alloc_uninit<u32>(4);
@@ -144,48 +151,69 @@ const un: View<Uninit<u32>> = region.heap().alloc_uninit<u32>(4);
 const init: View<u32> = view.assume_init(un);  // only legal when fully initialized
 ```
 
----
+this prevents undefined behavior from reading garbage.
 
-## Device Regions & DMA
+## device regions
 
 `region.device(id)` exposes device memory:
 
-- host access may be illegal — attempting read/write without device mapping yields compile-time error or runtime trap
-- transfers require explicit copy functions:
-
 ```ferrule
-device.copy_to_host(device_view, host_view);
-host.copy_to_device(host_view, device_view);
+const gpu = region.device(gpu_id);
+const gpu_buf = gpu.alloc<f32>(1024);
+
+// host access may be illegal without mapping
+device.copy_to_host(gpu_buf, host_buf);
+host.copy_to_device(host_buf, gpu_buf);
 ```
 
-These can return `err` values for transfer failures.
+transfers can fail and return errors.
 
----
+## regions and scoped ownership
 
-## Task Scopes & Region Lifetimes
-
-- regions created **inside** a task scope are disposed when the scope exits
-- passing a region **out** of its creating scope is allowed, but then **you** own disposal
-- compilers warn if a region is never disposed
-
-See [../concurrency/tasks.md](../concurrency/tasks.md).
-
----
-
-## Worked Example
+regions work with scoped ownership:
+- views can't escape their creation scope
+- regions created inside a scope are disposed when the scope exits
+- if you pass a region out, you own disposal
 
 ```ferrule
-// copy to caller's region
-function clone_to_region(src: View<u8>, dst_region: Region) -> View<u8> effects [alloc] {
-  return view.copy(src, to = dst_region);
-}
-
-// return region along with view (caller owns disposal)
-function clone_with_region(src: View<u8>) -> { data: View<u8>, region: Region } effects [alloc] {
-  const heap = region.heap();
-  const dst  = view.copy(src, to = heap);
-  return { data: dst, region: heap };
+function process() -> View<u8> {
+    const arena = region.arena(1024);
+    defer arena.dispose();
+    
+    const buf = arena.alloc<u8>(100);
+    return buf;  // error: buf escapes its region
 }
 ```
 
+to return data, copy it:
 
+```ferrule
+function process(out_region: Region) -> View<u8> effects [alloc] {
+    const arena = region.arena(1024);
+    defer arena.dispose();
+    
+    const buf = arena.alloc<u8>(100);
+    // ... process buf ...
+    return view.copy(buf, to = out_region);  // ok: copy to caller's region
+}
+```
+
+## example: request-scoped allocation
+
+```ferrule
+function handleRequest(req: Request, cap io: Io) -> Response 
+    error RequestError 
+    effects [alloc, io] 
+{
+    const arena = region.arena(1 << 20);  // 1mb for this request
+    defer arena.dispose();
+    
+    const body = check parseBody(req, arena);
+    const result = check process(body, arena);
+    const response = check serialize(result, arena);
+    
+    // copy response to caller's region before returning
+    return response.clone();
+}
+// arena disposed here, all request memory freed
+```

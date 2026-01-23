@@ -1,7 +1,17 @@
-# Inline Assembly
+---
+title: inline assembly
+status: rfc
+implemented: []
+pending: []
+deferred:
+  - asm-syntax
+  - target-architectures
+  - clobbers
+---
 
-> **scope:** typed inline assembly syntax, constraints, targets  
-> **related:** [ffi.md](ffi.md) | [../functions/effects.md](../functions/effects.md)
+# inline assembly
+
+> this feature is an rfc. the spec describes what it might be, not what's committed.
 
 ---
 

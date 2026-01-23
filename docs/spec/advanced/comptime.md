@@ -1,13 +1,24 @@
-# Compile-Time Evaluation
-
-> **scope:** comptime functions, typed transforms, reflection  
-> **related:** [../core/types.md](../core/types.md)
-
+---
+title: compile-time evaluation
+status: α2
+implemented: []
+pending: []
+deferred:
+  - comptime-functions
+  - typed-transforms
+  - reflection
+  - type-introspection
 ---
 
-## Comptime Functions
+# compile-time evaluation
 
-Functions marked `comptime` run at compile time:
+> this feature is planned for α2. the spec describes what it will be, not what's implemented now.
+
+comptime lets you run code at compile time. this is useful for generating lookup tables, validating constants, and code generation.
+
+## comptime functions
+
+functions marked `comptime` run at compile time:
 
 ```ferrule
 comptime function crc16_table(poly: u16) -> Array<u16, 256> {
@@ -17,7 +28,7 @@ comptime function crc16_table(poly: u16) -> Array<u16, 256> {
     var crc: u16 = u16(i) << 8;
     var j: u32 = 0;
     while j < 8 {
-      if (crc & 0x8000) !== 0 {
+            if (crc & 0x8000) != 0 {
         crc = (crc << 1) ^ poly;
       } else {
         crc = crc << 1;
@@ -33,35 +44,33 @@ comptime function crc16_table(poly: u16) -> Array<u16, 256> {
 const CRC16 = comptime crc16_table(0x1021);
 ```
 
----
+the result is computed at compile time and embedded in the binary.
 
-## Comptime Rules
+## rules
 
-Comptime functions must be **pure and deterministic**:
-- no ambient I/O
+comptime functions must be pure and deterministic:
+- no ambient io
 - no effects (no `effects [...]` declaration)
-- no error clause (cannot fail)
+- no error clause (can't fail)
 - results are memoized by arguments
 - results are cacheable across builds
 
----
+this ensures builds are reproducible.
 
-## Comptime Invocation
+## invocation
 
-Use `comptime` keyword to evaluate at compile time:
+use the `comptime` keyword to evaluate at compile time:
 
 ```ferrule
 const PAGE_SIZE = comptime layout.page_size();
 const LOOKUP_TABLE = comptime generate_table();
 ```
 
-The result must be a constant-evaluable value.
+the result must be a constant-evaluable value.
 
----
+## typed transforms
 
-## Typed Transforms
-
-Typed transforms operate on the **typed IR** (not raw syntax):
+typed transforms operate on the typed ir (not raw syntax):
 
 ```ferrule
 transform derive_serialize<T> {
@@ -70,22 +79,20 @@ transform derive_serialize<T> {
 }
 ```
 
-Use cases:
-- FFI shim generation
-- Serialization/deserialization codecs
-- CLI argument parsers
-- WASM component interfaces
+use cases:
+- ffi shim generation
+- serialization/deserialization codecs
+- cli argument parsers
+- wasm component interfaces
 
-Transforms:
-- receive typed AST nodes
+transforms:
+- receive typed ast nodes
 - must produce valid, type-checked output
 - are applied at compile time
 
----
+## reflection
 
-## Reflection (Layout Queries)
-
-Query type layouts at compile time:
+query type layouts at compile time:
 
 ```ferrule
 const page: usize = layout.page_size();
@@ -93,20 +100,18 @@ const alignOfBlob: usize = layout.alignof<Blob>();
 const sizeOfBlob: usize = layout.sizeof<Blob>();
 ```
 
-### Available Queries
+available queries:
 
-| Function | Returns |
+| function | returns |
 |----------|---------|
 | `layout.sizeof<T>()` | size in bytes |
 | `layout.alignof<T>()` | alignment in bytes |
 | `layout.page_size()` | system page size |
 | `layout.cache_line_size()` | cache line size |
 
----
+## type introspection
 
-## Type Introspection
-
-Limited introspection for transforms:
+limited introspection for transforms:
 
 ```ferrule
 comptime function field_names<T>() -> Array<String, n> {
@@ -118,9 +123,7 @@ comptime function variant_names<T>() -> Array<String, n> {
 }
 ```
 
----
-
-## Example: Lookup Table Generation
+## example: lookup table
 
 ```ferrule
 comptime function sin_table(steps: u32) -> Array<f32, steps> {
@@ -137,12 +140,12 @@ comptime function sin_table(steps: u32) -> Array<f32, steps> {
 const SIN_256 = comptime sin_table(256);
 ```
 
----
+## what this enables
 
-## Feature Gates
+comptime is essential for:
+- **embedded**: compute lookup tables at build time, not runtime
+- **zero-cost abstractions**: generate specialized code
+- **derive macros**: auto-generate serialization, comparison, etc.
+- **validation**: ensure constants are valid at build time
 
-In early toolchains, some comptime features may be behind feature gates:
-- `typed_transforms`
-- `advanced_reflection`
-
-
+the key is: if the compiler can compute it, do it at compile time.

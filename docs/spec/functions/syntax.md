@@ -1,23 +1,35 @@
-# Function Syntax
-
-> **scope:** function declaration form, parameters, return types, anonymous functions  
-> **related:** [effects.md](effects.md) | [../errors/domains.md](../errors/domains.md) | [../core/generics.md](../core/generics.md)
-
+---
+title: function syntax
+status: α1
+implemented:
+  - function-keyword
+  - named-functions
+  - anonymous-functions
+  - basic-parameters
+  - return-types
+  - generic-functions
+pending:
+  - inout-parameters
+  - cap-parameters
+deferred:
+  - closure-captures (α2)
 ---
 
-## Declaration Form
+# function syntax
+
+ferrule uses `function` for everything. named functions, anonymous functions, inline lambdas. no arrows, no `fn`, no shorthands. one way to write functions.
+
+## declaration form
 
 ```ferrule
-function name<TypeParams>(params...) -> ReturnType [error ErrorDomain]? [effects [...]]? { ... }
+function name<TypeParams>(params...) -> ReturnType error ErrorDomain effects [...] {
+    // body
+}
 ```
 
-- **`function`** is the only declaration keyword — for named, anonymous, and inline functions
-- **effects** enumerate potential side effects; absence means pure/suspend-free
-- **error** clause declares typed failure; see [../errors/domains.md](../errors/domains.md)
+everything after ReturnType is optional.
 
----
-
-## Named Functions
+## named functions
 
 ```ferrule
 function add(x: i32, y: i32) -> i32 {
@@ -25,15 +37,13 @@ function add(x: i32, y: i32) -> i32 {
 }
 
 function greet(name: String) -> String {
-  return "Hello, " ++ name;
+    return "hello, " ++ name;
 }
 ```
 
----
+## anonymous functions
 
-## Anonymous Functions
-
-Use the same `function` keyword:
+same `function` keyword:
 
 ```ferrule
 const double = function(x: i32) -> i32 {
@@ -41,17 +51,13 @@ const double = function(x: i32) -> i32 {
 };
 
 const greet = function(name: String) -> String {
-  return "Hello, " ++ name;
+    return "hello, " ++ name;
 };
 ```
 
-**No arrow syntax** — Ferrule does not use `=>` or `fn` shorthands.
+## inline functions
 
----
-
-## Inline Functions
-
-When passing functions as arguments:
+when passing functions as arguments:
 
 ```ferrule
 map(items, function(item: Item) -> String {
@@ -63,7 +69,7 @@ filter(numbers, function(n: i32) -> Bool {
 });
 ```
 
-**Prefer named functions for clarity:**
+prefer named functions for clarity:
 
 ```ferrule
 function getName(item: Item) -> String {
@@ -78,11 +84,9 @@ map(items, getName);
 filter(numbers, isPositive);
 ```
 
----
+## parameters
 
-## Parameters
-
-### Basic Parameters
+### basic
 
 ```ferrule
 function add(x: i32, y: i32) -> i32 { 
@@ -90,7 +94,7 @@ function add(x: i32, y: i32) -> i32 {
 }
 ```
 
-### Inout Parameters
+### inout (by reference)
 
 ```ferrule
 function increment(inout counter: u32) -> Unit { 
@@ -98,9 +102,9 @@ function increment(inout counter: u32) -> Unit {
 }
 ```
 
-See [../core/declarations.md](../core/declarations.md#by-reference-parameters).
+the mutation is visible to the caller. see [../core/declarations.md](/docs/core/declarations).
 
-### Capability Parameters
+### capabilities
 
 ```ferrule
 function readFile(path: Path, cap fs: Fs) -> Bytes error IoError effects [fs] {
@@ -108,31 +112,27 @@ function readFile(path: Path, cap fs: Fs) -> Bytes error IoError effects [fs] {
 }
 ```
 
-See [../modules/capabilities.md](../modules/capabilities.md).
+see [../modules/capabilities.md](/docs/modules/capabilities).
 
----
+## return types
 
-## Return Types
-
-Every function must declare a return type:
+every function must declare a return type:
 
 ```ferrule
 function greet(name: String) -> String {
-  return "Hello, " ++ name;
+    return "hello, " ++ name;
 }
 ```
 
-Use `Unit` for functions that don't return a meaningful value:
+use `Unit` for functions that don't return a meaningful value:
 
 ```ferrule
-function log(message: String) -> Unit effects [io] {
+function log(message: String, cap io: Io) -> Unit effects [io] {
   io.println(message);
 }
 ```
 
----
-
-## Generic Functions
+## generic functions
 
 ```ferrule
 function identity<T>(x: T) -> T {
@@ -144,13 +144,11 @@ function swap<T, U>(pair: { first: T, second: U }) -> { first: U, second: T } {
 }
 ```
 
-See [../core/generics.md](../core/generics.md).
+see [../core/generics.md](/docs/core/generics).
 
----
+## error clauses
 
-## Error Clauses
-
-Functions that can fail declare their error domain:
+functions that can fail declare their error domain:
 
 ```ferrule
 function parsePort(s: String) -> Port error ParseError {
@@ -158,51 +156,21 @@ function parsePort(s: String) -> Port error ParseError {
 }
 ```
 
-If omitted and `use error` is in scope, the module default applies:
+see [../errors/propagation.md](/docs/errors/propagation).
+
+## effects declaration
 
 ```ferrule
-use error IoError;
-
-function readConfig(path: Path) -> Config effects [fs] {
-  // implicitly: error IoError
-}
-```
-
-**Public/ABI exports must be explicit** about `error E`.
-
-See [../errors/propagation.md](../errors/propagation.md) for `ok`/`err`/`check`/`ensure`.
-
----
-
-## Effects Declaration
-
-```ferrule
-function fetch(url: Url) -> Response error ClientError effects [net, time] {
+function fetch(url: Url, cap net: Net) -> Response error ClientError effects [net, time] {
   // may perform net and time effects
 }
 ```
 
-See [effects.md](effects.md) for full effect semantics.
+see [effects](/docs/functions/effects).
 
----
+## function types
 
-## Complete Example
-
-```ferrule
-function save(
-  path: Path, 
-  data: View<u8>, 
-  cap fs: Fs
-) -> Unit error IoError effects [fs] {
-  return check fs.writeAll(path, data);
-}
-```
-
----
-
-## Function Types
-
-Function types in type annotations:
+function types in type annotations:
 
 ```ferrule
 type Predicate<T> = (T) -> Bool;
@@ -214,15 +182,25 @@ const isEven: Predicate<i32> = function(n: i32) -> Bool {
 };
 ```
 
----
+## complete example
 
-## Summary
+```ferrule
+function save(
+    path: Path, 
+    data: View<u8>, 
+    cap fs: Fs
+) -> Unit error IoError effects [fs] {
+    return check fs.writeAll(path, data);
+}
+```
 
-| Form | Syntax |
+## summary
+
+| form | syntax |
 |------|--------|
-| Named | `function name(...) -> T { ... }` |
-| Anonymous | `const f = function(...) -> T { ... };` |
-| Inline | `map(items, function(x: T) -> U { ... })` |
-| Generic | `function name<T>(...) -> T { ... }` |
-| With effects | `function name(...) -> T effects [...] { ... }` |
-| With error | `function name(...) -> T error E { ... }` |
+| named | `function name(...) -> T { ... }` |
+| anonymous | `const f = function(...) -> T { ... };` |
+| inline | `map(items, function(x: T) -> U { ... })` |
+| generic | `function name<T>(...) -> T { ... }` |
+| with effects | `function name(...) -> T effects [...] { ... }` |
+| with error | `function name(...) -> T error E { ... }` |

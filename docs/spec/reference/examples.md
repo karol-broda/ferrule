@@ -1,7 +1,9 @@
-# Worked Examples
+---
+title: worked examples
+status: α1
+---
 
-> **scope:** complete examples demonstrating Ferrule features  
-> **related:** all spec documents
+# worked examples
 
 ---
 

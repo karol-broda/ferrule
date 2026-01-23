@@ -1,7 +1,18 @@
-# Lexical Structure
+---
+title: lexical structure
+status: α1
+implemented:
+  - utf8-encoding
+  - identifiers
+  - keywords
+  - comments
+  - number-literals
+  - string-literals
+pending: []
+deferred: []
+---
 
-> **scope:** source encoding, identifiers, keywords, whitespace, comments  
-> **related:** [keywords.md](../reference/keywords.md)
+# lexical structure
 
 ---
 
@@ -49,7 +60,7 @@ Block comments may be nested.
 
 ## Keywords
 
-See [reference/keywords.md](../reference/keywords.md) for the complete list.
+See [reference/keywords.md](/docs/reference/keywords) for the complete list.
 
 **Reserved in α1:**
 

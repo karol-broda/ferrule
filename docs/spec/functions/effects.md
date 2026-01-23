@@ -1,165 +1,133 @@
-# Effects
-
-> **scope:** effect system, standard effects, subset rule, effect polymorphism, async suspension  
-> **related:** [syntax.md](syntax.md) | [../modules/capabilities.md](../modules/capabilities.md) | [../concurrency/tasks.md](../concurrency/tasks.md)
-
+---
+title: effects
+status: α1
+implemented:
+  - effect-syntax
+  - effect-subset-rule
+  - standard-effects
+pending:
+  - effect-inference
+  - capability-flow-lint
+deferred:
+  - effect-polymorphism (α2)
+  - suspend-effect (β)
+  - async-suspension (β)
 ---
 
-## Overview
+# effects
 
-- Effects declare **what a function may do** (I/O, allocation, time, atomics, etc.)
-- Effects are **part of the function type** but kept **separate from type generics**
-- There are **no implicit effects**; absence of `effects [...]` means pure, non-suspending
-- Async suspension is allowed **only if** an appropriate effect is present
+effects declare what a function might do. io, allocation, time access, that kind of thing. they're part of the function type but separate from type generics.
 
----
+no effects means pure. you can tell from the signature whether a function does io.
 
-## Standard Effects (α1)
+## syntax
 
-| Effect | Meaning | Typical Capabilities |
-|--------|---------|---------------------|
-| `alloc` | allocate/free memory in the current region or via an allocator | — |
-| `fs` | file system operations (open, read, write, stat) | `Fs` |
-| `net` | networking (connect, send, receive) | `Net` |
-| `io` | generic non-fs, non-net device I/O | device caps |
-| `time` | access clocks, sleep, deadlines | `Clock` |
-| `rng` | randomness | `Rng` |
-| `atomics` | atomic memory operations | — |
-| `simd` | usage of SIMD intrinsics | — |
-| `cpu` | privileged CPU instructions (rdtsc, cpuid, fences) | — |
-| `ffi` | calls across foreign ABIs (C/WASM/other) | corresponding caps |
-
-> Projects may add domain-specific effects (e.g., `gpu`, `db`) via tooling.
-
----
-
-## Syntax
-
-Types and effects are **separate** — types in `<>`, effects in `[]`:
+types go in `<>`, effects go in `[]`:
 
 ```ferrule
-function process<T, U>(input: T) -> U effects [alloc, io] { ... }
+function process<T, U>(input: T) -> U effects [alloc, io] {
+    // ...
+}
 ```
 
----
+a function with no effects clause is pure:
 
-## Effect Subset Rule
+```ferrule
+function add(x: i32, y: i32) -> i32 {
+    return x + y;
+}
+```
 
-For any call `g()` inside `f`:
+## standard effects
 
-**effects(g) ⊆ effects(f)**
+| effect | meaning | needs capability? |
+|--------|---------|-------------------|
+| `alloc` | allocate/free memory | no |
+| `fs` | file system operations | yes, `Fs` |
+| `net` | networking | yes, `Net` |
+| `io` | generic device io | yes, device cap |
+| `time` | access clocks, sleep | yes, `Clock` |
+| `rng` | randomness | yes, `Rng` |
+| `atomics` | atomic memory operations | no |
+| `simd` | simd intrinsics | no |
+| `cpu` | privileged cpu instructions | no |
+| `ffi` | foreign abi calls | depends |
 
-If not satisfied, the compiler diagnoses with the missing effects.
+some effects need capabilities (fs, net, time, rng). others don't (alloc, atomics, simd). see [../modules/capabilities.md](/docs/modules/capabilities).
+
+## subset rule
+
+for any call `g()` inside `f`, the effects of g must be a subset of f's effects:
 
 ```ferrule
 function caller() -> Unit effects [fs] {
-  netCall();  // ERROR: requires effect [net], not subset of [fs]
+    netCall();  // error: requires [net], not in [fs]
 }
 ```
 
----
+this is the core enforcement. you can't sneak effects past the caller.
 
-## Effect Inference vs Explicitness
+## effects vs capabilities
 
-### Within a Module
+this is important to understand: they're related but different.
 
-The compiler may **infer** a function's effect set from its body when omitted.
+**effects** are markers. they say "this function might do io" or "this function might allocate". they're compile-time information.
 
-### Public Symbols
+**capabilities** are values. they're the authority to actually do the io. you pass them around.
 
-**Public symbols must spell their effect sets explicitly.** This includes:
-- Exports from a package/module
-- C/WASM component boundaries
+the relationship:
 
-Toolchains reject exports with inferred effects.
+| effect | capability | explanation |
+|--------|------------|-------------|
+| `fs` | `Fs` | need Fs cap to do fs effect |
+| `net` | `Net` | need Net cap to do net effect |
+| `time` | `Clock` | need Clock cap to do time effect |
+| `rng` | `Rng` | need Rng cap to do rng effect |
+| `alloc` | none | just marks allocation |
+| `atomics` | none | just marks atomic ops |
 
----
-
-## Effect Polymorphism
-
-### Spread Syntax
-
-Spread parameter function effects into the caller:
-
-```ferrule
-function map<T, U>(arr: View<T>, f: (T) -> U) -> View<U> effects [alloc, ...] {
-  // ... means: include all effects from f
-}
-```
-
-### Explicit Effect Variables
-
-For more control, name the effect set:
-
-```ferrule
-function map<T, U>(arr: View<T>, f: (T) -> U effects F) -> View<U> 
-  effects [alloc, ...F] 
-{
-  // F is the effect set of f
-  // map has alloc plus whatever f has
-}
-```
-
-### Effect Constraints
-
-Require specific effects:
-
-```ferrule
-function withTimeout<T, E>(op: () -> T error E effects F) -> T error E 
-  effects [time, ...F]
-  where F includes [time]
-{
-  // F must include time
-}
-```
-
----
-
-## Async Suspension
-
-A function may suspend **only if** `effects` includes one of:
-- `net`
-- `io`
-- `time`
-- A user-defined suspending effect
-
-```ferrule
-function fetch(url: Url, deadline: Time) -> Response error ClientError effects [net, time] {
-  const tok = cancel.token(deadline);
-  const sock = map_error net.connect(url.host, url.port, tok)
-               using (e => ClientError.Timeout { ms: time.until(deadline) });
-  return check request(sock, url, tok) with { op: "request" };
-}
-```
-
----
-
-## Capabilities vs Effects
-
-- **Effects** describe what might happen
-- **Capabilities** are authority values you must pass
-
-### Static Rule
-
-If a function lists `fs` in its effects, it must either:
-1. Take at least one `cap Fs` parameter, or
-2. Call another function that takes such a parameter
-
-This is enforced by a **capability flow lint**.
+if a function has `effects [fs]`, it must have a `cap fs: Fs` somewhere in the call chain. this is checked by the capability flow lint.
 
 ```ferrule
 function readAll(p: Path, cap fs: Fs) -> Bytes error IoError effects [fs] {
-  const f = check fs.open(p);
-  const bs = check fs.readAll(f);
-  return ok bs;
+    const f = check fs.open(p);
+    return ok check fs.readAll(f);
 }
 ```
 
----
+## purity
 
-## Higher-Order Functions with Effects
+a pure function has no effects and no error clause:
 
-### Basic Pattern
+```ferrule
+function add(x: i32, y: i32) -> i32 {
+    return x + y;
+}
+```
+
+functions with `error E` are not pure even if they have no effects. error propagation is a form of control flow.
+
+## effect inference
+
+within a module, the compiler can infer effects from the function body. but public symbols must spell them out:
+
+```ferrule
+// private, inference ok
+function helper() {
+    println("hello");  // inferred: effects [io]
+}
+
+// public, must be explicit
+pub function api() -> Unit effects [io] {
+    helper();
+}
+```
+
+exports without explicit effects are rejected.
+
+## higher-order functions
+
+when you take a function as parameter, you need to handle its effects:
 
 ```ferrule
 function forEach<T>(items: View<T>, f: (T) -> Unit effects F) -> Unit effects [...F] {
@@ -169,75 +137,56 @@ function forEach<T>(items: View<T>, f: (T) -> Unit effects F) -> Unit effects [.
 }
 ```
 
-### With Capabilities
+the `...F` spreads the effects from f into forEach's effects. whatever effects f has, forEach also has.
 
-Thread capabilities explicitly:
+## threading capabilities
+
+for higher-order functions that need capabilities:
 
 ```ferrule
-function mapWithCap<T, U, C>(
-  arr: View<T>, 
-  f: (T, cap c: C) -> U,
-  cap c: C
-) -> View<U> effects [alloc] {
-  // pass capability to each invocation
-}
-
-function processFiles(paths: View<Path>, cap fs: Fs) -> View<String> error IoError effects [fs, alloc] {
-  return mapWithCap(paths, function(p: Path, cap fs: Fs) -> String {
+function processFiles(paths: View<Path>, cap fs: Fs) -> View<String> 
+    error IoError 
+    effects [fs, alloc] 
+{
+    return paths.map(function(p: Path) -> String effects [fs] {
     return check fs.readAllText(p);
-  }, fs);
+    });
 }
 ```
 
----
+the capability flows through the closure.
 
-## Effect-Parametric Helpers
+## what's planned
 
-Push effectful edges out for pure, composable helpers:
+**effect polymorphism** (α2) with named effect variables:
 
 ```ferrule
-// pure: works with any call site
-function mapOk<T, U, E>(r: Result<T, E>, f: (T) -> U) -> Result<U, E> {
-  match r { 
-    ok v  -> ok f(v); 
-    err e -> err e;
-  }
+function map<T, U>(arr: View<T>, f: (T) -> U effects F) -> View<U> 
+    effects [alloc, ...F] 
+{
+    // F is whatever effects f has
 }
 ```
 
----
-
-## Purity
-
-A **pure function** has:
-- No error clause
-- No effects declaration (or empty `effects []`)
+**suspend effect** (β) for async:
 
 ```ferrule
-function add(x: i32, y: i32) -> i32 {
-  return x + y;
+function fetch(url: String, cap net: Net) -> Response 
+    error NetError 
+    effects [net, suspend] 
+{
+    const socket = net.connect(url.host, url.port)?;
+    return ok socket.readAll()?;  // may suspend here
 }
 ```
 
-Functions with `error E` clauses are **not pure**, even without explicit effects.
+the suspend effect means the function may pause and resume. this is how async works without function coloring. see the async rfc for details.
 
----
+## summary
 
-## Determinism & Testing
-
-- **Deterministic mode** swaps schedulers and stubs capabilities (`Clock`, `Rng`)
-- Effect usage that introduces nondeterminism must route through capabilities
-
-See [../concurrency/determinism.md](../concurrency/determinism.md).
-
----
-
-## Summary
-
-| Syntax | Meaning |
+| syntax | meaning |
 |--------|---------|
-| `effects [fs, net]` | Function has fs and net effects |
-| `effects [alloc, ...]` | Has alloc plus spread from parameters |
-| `effects [...F]` | Has all effects from F |
-| `where F includes [time]` | F must contain time |
-| No `effects` clause | Pure (within module) or error if public |
+| `effects [fs, net]` | has fs and net effects |
+| `effects [alloc, ...]` | has alloc plus spread from params |
+| `effects [...F]` | has all effects from F |
+| no effects clause | pure (private) or error (public) |

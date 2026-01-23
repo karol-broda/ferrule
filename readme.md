@@ -1,40 +1,39 @@
-# Ferrule
+# ferrule
 
 <div align="center">
 
-**A modern systems language with explicit control**
+**a systems language where effects and capabilities are first-class**
 
-α1 • alpha 1
+α1
 
 </div>
 
 ---
 
-## What is Ferrule?
+## what is ferrule?
 
-Ferrule is a low-level systems language designed around **explicit control** and **predictable behavior**:
+ferrule is a low-level systems language where you get zig-level control with safety guarantees about *what code can do*, not just what memory it touches.
 
-- **Errors as values** — no exceptions, typed error domains, lightweight propagation
-- **Explicit effects** — functions declare what they can do (`fs`, `net`, `time`, etc.)
-- **Regions & views** — deterministic memory without garbage collection
-- **Capability security** — no ambient authority; permissions are values you pass
-- **Strict nominal types** — no accidental structural compatibility
-- **Content-addressed packages** — reproducible builds with provenance
+- **errors as values** — no exceptions, typed error domains, lightweight propagation
+- **explicit effects** — functions declare what they can do (`fs`, `net`, `time`, etc.)
+- **scoped ownership** — move semantics without a borrow checker
+- **capability security** — no ambient authority; permissions are values you pass
+- **strict nominal types** — no accidental structural compatibility
 
 ```ferrule
 error NotFound { path: Path }
 error Denied { path: Path }
-domain IoError = NotFound | Denied;
+type IoError = NotFound | Denied;
 
 function readConfig(path: Path, cap fs: Fs) -> Config error IoError effects [fs] {
-  const data = check fs.readAll(path) with { op: "readConfig" };
+  const data = check fs.readAll(path);
   return ok parse(data);
 }
 ```
 
 ---
 
-## Quick Start
+## quick start
 
 ```bash
 # create a new project
@@ -48,123 +47,126 @@ ferrule run
 
 ---
 
-## Documentation
+## documentation
 
-| Document | Description |
+| document | description |
 |----------|-------------|
-| [Language Specification](docs/spec/_index.md) | Complete language reference |
-| [Package Management](docs/package-management.md) | Manifests, lockfiles, CLI |
+| [language specification](docs/spec/_index.md) | complete language reference |
+| [package management](docs/package-management.md) | manifests, lockfiles, cli |
 
-### Specification Index
+### specification index
 
-**Core Language**
-- [Lexical Structure](docs/spec/core/lexical.md) — encoding, identifiers, keywords
-- [Types](docs/spec/core/types.md) — scalars, unions, refinements, nominal typing
-- [Declarations](docs/spec/core/declarations.md) — `const`, `var`, `inout`, inference
-- [Control Flow](docs/spec/core/control-flow.md) — `if`, `match`, loops
-- [Generics](docs/spec/core/generics.md) — variance, conditional types, polymorphism
+**core language**
+- [lexical structure](docs/spec/core/lexical.md) — encoding, identifiers, keywords
+- [types](docs/spec/core/types.md) — scalars, unions, nominal typing
+- [declarations](docs/spec/core/declarations.md) — `const`, `var`, `inout`, move semantics
+- [control flow](docs/spec/core/control-flow.md) — `if`, `match`, loops
+- [generics](docs/spec/core/generics.md) — type parameters, constraints
 
-**Functions & Effects**
-- [Function Syntax](docs/spec/functions/syntax.md) — `function` keyword for all
-- [Effects](docs/spec/functions/effects.md) — effect system, polymorphism
+**functions and effects**
+- [function syntax](docs/spec/functions/syntax.md) — `function` keyword for all
+- [effects](docs/spec/functions/effects.md) — effect system, subset rule
 
-**Error Handling**
-- [Error Domains](docs/spec/errors/domains.md) — standalone errors, Pick/Omit
-- [Propagation](docs/spec/errors/propagation.md) — `check`, `ensure`, `map_error`
+**error handling**
+- [error domains](docs/spec/errors/domains.md) — standalone errors, domains as unions
+- [propagation](docs/spec/errors/propagation.md) — `check`, `ensure`
 
-**Memory**
-- [Regions](docs/spec/memory/regions.md) — allocation, disposal, transfer
-- [Views](docs/spec/memory/views.md) — fat pointers, slicing, aliasing
-- [Capsules](docs/spec/memory/capsules.md) — unique resources
+**memory**
+- [ownership](docs/spec/memory/ownership.md) — move semantics, copy vs move
+- [regions](docs/spec/memory/regions.md) — allocation, disposal (α2)
+- [views](docs/spec/memory/views.md) — fat pointers, slicing (α2)
 
-**Modules**
-- [Packages](docs/spec/modules/packages.md) — deps.fe, content addressing
-- [Imports](docs/spec/modules/imports.md) — resolution
-- [Capabilities](docs/spec/modules/capabilities.md) — authority values
+**modules**
+- [packages](docs/spec/modules/packages.md) — deps.fe, project structure
+- [imports](docs/spec/modules/imports.md) — resolution, visibility
+- [capabilities](docs/spec/modules/capabilities.md) — `with cap` syntax, linear types
 
-**Reference**
-- [Grammar](docs/spec/reference/grammar.md) — EBNF
-- [Operators](docs/spec/reference/operators.md) — precedence (`==` not `===`)
-- [Examples](docs/spec/reference/examples.md) — worked examples
+**unsafe**
+- [unsafe blocks](docs/spec/unsafe/blocks.md) — raw pointers, extern calls
 
----
-
-## Design Pillars
-
-1. **Immutability-first** — `const` by default
-2. **Errors as values** — no exceptions
-3. **Explicit effects** — colorless async
-4. **Regions & views** — no GC
-5. **Capability security** — no ambient authority
-6. **Strict nominal types** — no structural compatibility
-7. **Content-addressed packages** — reproducible
-8. **Determinism on demand** — test scheduling
-9. **No implicit coercions** — explicit always
-10. **Explicit polymorphism** — records + generics, no OOP
+**reference**
+- [grammar](docs/spec/reference/grammar.md) — ebnf
+- [keywords](docs/spec/reference/keywords.md) — reserved words
+- [operators](docs/spec/reference/operators.md) — precedence (`==` not `===`)
+- [stdlib](docs/spec/reference/stdlib.md) — standard library
 
 ---
 
-## Example
+## design pillars
+
+1. **immutability first** — `const` by default
+2. **errors as values** — no exceptions
+3. **explicit effects** — functions declare what they do
+4. **scoped ownership** — move semantics, no borrow checker
+5. **capability security** — no ambient authority
+6. **strict nominal types** — no structural compatibility
+7. **no implicit coercions** — explicit always
+8. **explicit polymorphism** — records + generics, no traits
+
+---
+
+## example
 
 ```ferrule
 package my.app;
 
-import net.http { Client } using capability net;
-import time { Clock } using capability time;
+import std.io { println };
 
 error Timeout { ms: u64 }
 error Network { message: String }
-domain AppError = Timeout | Network;
+type AppError = Timeout | Network;
 
-// operation record for showing things
-type Showable<T> = { show: (T) -> String };
-
-const Response.show: Showable<Response> = {
-  show: function(r: Response) -> String { return r.body; }
-};
-
-function main(cap net: Net, cap clock: Clock) -> Unit error AppError effects [net, time] {
-  const deadline = clock.now() + Duration.seconds(30);
-  const response = check fetchWithRetry("https://api.example.com", deadline, net, clock);
-  
-  io.println(Response.show.show(response));
-  return ok Unit;
+function main(args: Args) -> i32 
+    with cap io: Io, cap net: Net, cap clock: Clock
+{
+    const deadline = clock.now() + Duration.seconds(30);
+    
+    match fetchWithRetry("https://api.example.com", deadline, net, clock) {
+        ok resp => {
+            println(resp.body, io);
+            return 0;
+        },
+        err e => {
+            println("request failed", io);
+            return 1;
+        }
+    }
 }
 
 function fetchWithRetry(
-  url: String, 
-  deadline: Time, 
-  cap net: Net, 
-  cap clock: Clock
+    url: String, 
+    deadline: Time, 
+    cap net: Net, 
+    cap clock: Clock
 ) -> Response error AppError effects [net, time] {
-  var attempts: u32 = 0;
-  
-  while attempts < 3 {
-    const result = net.get(url, cancel.token(deadline));
+    var attempts: u32 = 0;
     
-    match result {
-      ok resp -> return ok resp;
-      err e -> {
-        attempts = attempts + 1;
-        if attempts < 3 {
-          clock.sleep(Duration.seconds(1));
+    while attempts < 3 {
+        match net.get(url) {
+            ok resp => return ok resp,
+            err e => {
+                attempts = attempts + 1;
+                if attempts < 3 {
+                    clock.sleep(Duration.seconds(1));
+                }
+            }
         }
-      }
     }
-  }
-  
-  return err Timeout { ms: time.until(deadline) };
+    
+    return err Timeout { ms: 30000 };
 }
 ```
 
 ---
 
-## Status
+## status
 
-**α1 (Alpha 1)** — Language design is stabilizing. Syntax and semantics are subject to change.
+**α1** — language design is stabilizing. core features working, many planned features not yet implemented.
+
+see the [specification](`docs/spec/_index.md`) for what's implemented vs planned.
 
 ---
 
-## License
+## license
 
-[Apache 2.0](LICENSE)
+[apache 2.0](LICENSE)

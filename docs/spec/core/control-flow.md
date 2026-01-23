@@ -1,7 +1,21 @@
-# Control Flow
+---
+title: control flow
+status: α1
+implemented:
+  - conditionals
+  - for-loops
+  - while-loops
+  - break-continue
+  - pattern-matching
+  - exhaustiveness-checking
+pending:
+  - match-check
+  - while-match
+deferred:
+  - const-match (α2)
+---
 
-> **scope:** conditionals, loops, pattern matching  
-> **related:** [types.md](types.md) | [../errors/propagation.md](../errors/propagation.md)
+# control flow
 
 ---
 

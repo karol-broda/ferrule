@@ -1,7 +1,18 @@
-# Capsules
+---
+title: capsules
+status: rfc
+implemented: []
+pending: []
+deferred:
+  - non-copy-semantics
+  - finalization
+  - registration
+  - secure-zeroing
+---
 
-> **scope:** unique resources, finalization, non-copy semantics  
-> **related:** [regions.md](regions.md) | [views.md](views.md)
+# capsules
+
+> this feature is an rfc. the spec describes what it might be, not what's committed.
 
 ---
 
