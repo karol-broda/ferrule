@@ -2,8 +2,7 @@
   "name": "ferrule-workspace",
   "private": true,
   "workspaces": [
-    "tooling/*",
-    "docs_web"
+    "tooling/*"
   ],
   "scripts": {
     "build": "turbo run build",
