@@ -112,7 +112,7 @@ const b = a;      // a is copied to b
 // both a and b are valid
 ```
 
-see [types.md](types#copy-vs-move-types) for which types are copy vs move.
+see [types.md](./types#copy-vs-move-types) for which types are copy vs move.
 
 ## use after move
 

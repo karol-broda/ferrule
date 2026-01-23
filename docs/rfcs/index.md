@@ -61,7 +61,7 @@ rfcs are not commitments. they may be accepted, modified, or rejected.
 
 ## writing an rfc
 
-use the [template](template) as a starting point. an rfc should:
+use the [template](./template.md) as a starting point. an rfc should:
 
 1. explain the motivation clearly
 2. describe the design in enough detail to implement

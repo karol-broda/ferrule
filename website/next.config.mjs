@@ -8,11 +8,11 @@ const config = {
   async rewrites() {
     return [
       {
-        source: '/spec/:path*.mdx',
+        source: '/spec/:path*.md',
         destination: '/llms.mdx/spec/:path*',
       },
       {
-        source: '/rfcs/:path*.mdx',
+        source: '/rfcs/:path*.md',
         destination: '/llms.mdx/rfcs/:path*',
       },
     ];

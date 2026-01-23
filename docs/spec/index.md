@@ -96,69 +96,69 @@ these features are designed but not part of α1:
 
 | document | scope |
 |----------|-------|
-| [core/lexical](core/lexical) | source encoding, identifiers, keywords, comments |
-| [core/types](core/types) | scalars, compounds, unions, nominal typing |
-| [core/declarations](core/declarations) | const, var, inout, move semantics |
-| [core/control-flow](core/control-flow) | if, match, for, while, break, continue |
-| [core/generics](core/generics) | type parameters, constraints |
+| [core/lexical](./core/lexical.md) | source encoding, identifiers, keywords, comments |
+| [core/types](./core/types.md) | scalars, compounds, unions, nominal typing |
+| [core/declarations](./core/declarations.md) | const, var, inout, move semantics |
+| [core/control-flow](./core/control-flow.md) | if, match, for, while, break, continue |
+| [core/generics](./core/generics.md) | type parameters, constraints |
 
 ### functions and effects
 
 | document | scope |
 |----------|-------|
-| [functions/syntax](functions/syntax) | function declaration |
-| [functions/effects](functions/effects) | effect system, standard effects |
+| [functions/syntax](./functions/syntax.md) | function declaration |
+| [functions/effects](./functions/effects.md) | effect system, standard effects |
 
 ### error handling
 
 | document | scope |
 |----------|-------|
-| [errors/domains](errors/domains) | error types, domains as unions |
-| [errors/propagation](errors/propagation) | ok, err, check, ensure |
+| [errors/domains](./errors/domains.md) | error types, domains as unions |
+| [errors/propagation](./errors/propagation.md) | ok, err, check, ensure |
 
 ### memory model
 
 | document | scope |
 |----------|-------|
-| [memory/ownership](memory/ownership) | move semantics, copy vs move |
-| [memory/regions](memory/regions) | region kinds, creation, disposal |
-| [memory/views](memory/views) | view formation, slicing, bounds |
+| [memory/ownership](./memory/ownership.md) | move semantics, copy vs move |
+| [memory/regions](./memory/regions.md) | region kinds, creation, disposal |
+| [memory/views](./memory/views.md) | view formation, slicing, bounds |
 
 ### modules and capabilities
 
 | document | scope |
 |----------|-------|
-| [modules/packages](modules/packages) | package structure, deps.fe |
-| [modules/imports](modules/imports) | import syntax |
-| [modules/capabilities](modules/capabilities) | capability parameters, with cap syntax |
+| [modules/packages](./modules/packages.md) | package structure, deps.fe |
+| [modules/imports](./modules/imports.md) | import syntax |
+| [modules/capabilities](./modules/capabilities.md) | capability parameters, with cap syntax |
 
 ### unsafe
 
 | document | scope |
 |----------|-------|
-| [unsafe/blocks](unsafe/blocks) | raw pointers, extern calls |
+| [unsafe/blocks](./unsafe/blocks.md) | raw pointers, extern calls |
 
 ### concurrency (β)
 
 | document | scope |
 |----------|-------|
-| [concurrency/tasks](concurrency/tasks) | task.scope, spawn, await |
-| [concurrency/determinism](concurrency/determinism) | test schedulers |
+| [concurrency/tasks](./concurrency/tasks.md) | task.scope, spawn, await |
+| [concurrency/determinism](./concurrency/determinism.md) | test schedulers |
 
 ### advanced (α2+)
 
 | document | scope |
 |----------|-------|
-| [advanced/comptime](advanced/comptime) | comptime functions, reflection |
-| [advanced/ffi](advanced/ffi) | c abi, extern |
+| [advanced/comptime](./advanced/comptime.md) | comptime functions, reflection |
+| [advanced/ffi](./advanced/ffi.md) | c abi, extern |
 
 ### reference
 
 | document | scope |
 |----------|-------|
-| [reference/grammar](reference/grammar) | complete ebnf grammar |
-| [reference/keywords](reference/keywords) | reserved words |
-| [reference/stdlib](reference/stdlib) | standard library surface |
+| [reference/grammar](./reference/grammar.md) | complete ebnf grammar |
+| [reference/keywords](./reference/keywords.md) | reserved words |
+| [reference/stdlib](./reference/stdlib.md) | standard library surface |
 
 ## key decisions
 

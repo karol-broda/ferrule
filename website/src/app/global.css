@@ -163,10 +163,23 @@
   --tracking-wide: 0.04em;
 }
 
-@keyframes fade-in {
+@keyframes reveal {
   from {
     opacity: 0;
-    transform: translateY(16px);
+    filter: blur(8px);
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: scale(1);
+  }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
   }
   to {
     opacity: 1;
@@ -174,21 +187,33 @@
   }
 }
 
-.animate-fade-in {
-  animation: fade-in 0.8s ease-out forwards;
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-reveal {
+  animation: reveal 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   opacity: 0;
 }
 
-.animation-delay-100 { animation-delay: 100ms; }
-.animation-delay-200 { animation-delay: 200ms; }
-.animation-delay-300 { animation-delay: 300ms; }
-.animation-delay-400 { animation-delay: 400ms; }
-.animation-delay-500 { animation-delay: 500ms; }
-.animation-delay-600 { animation-delay: 600ms; }
-.animation-delay-700 { animation-delay: 700ms; }
-.animation-delay-800 { animation-delay: 800ms; }
-.animation-delay-900 { animation-delay: 900ms; }
-.animation-delay-1000 { animation-delay: 1000ms; }
+.animate-slide-up {
+  animation: slide-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  opacity: 0;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.6s ease-out forwards;
+  opacity: 0;
+}
+
+.delay-0 { animation-delay: 0ms; }
+.delay-100 { animation-delay: 100ms; }
+.delay-200 { animation-delay: 200ms; }
+.delay-300 { animation-delay: 300ms; }
+.delay-400 { animation-delay: 400ms; }
+.delay-500 { animation-delay: 500ms; }
+.delay-600 { animation-delay: 600ms; }
 
 @layer base {
   * {
@@ -703,4 +728,76 @@ nav[data-navbar]::after {
   height: 1px;
   background: linear-gradient(to right, transparent, var(--primary), transparent);
   opacity: 0.2;
+}
+
+/* custom scrollbar */
+
+/* light mode - firefox and standard browsers */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.75 0.08 320) oklch(0.96 0.01 310);
+}
+
+/* dark mode - firefox */
+html.dark {
+  scrollbar-color: oklch(0.28 0.03 310) oklch(0.1 0.02 310);
+}
+
+/* light mode - webkit (chrome, safari, edge) */
+html::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+html::-webkit-scrollbar-track {
+  background: oklch(0.96 0.01 310);
+}
+
+html::-webkit-scrollbar-thumb {
+  background: oklch(0.75 0.08 320);
+  border-radius: 6px;
+  border: 3px solid oklch(0.96 0.01 310);
+}
+
+html::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, oklch(0.68 0.14 315) 0%, oklch(0.58 0.18 330) 100%);
+  border-radius: 6px;
+  border: 3px solid oklch(0.96 0.01 310);
+}
+
+html::-webkit-scrollbar-thumb:active {
+  background: linear-gradient(180deg, oklch(0.6 0.2 310) 0%, oklch(0.5 0.24 335) 100%);
+  border-radius: 6px;
+  border: 3px solid oklch(0.96 0.01 310);
+}
+
+html::-webkit-scrollbar-corner {
+  background: oklch(0.96 0.01 310);
+}
+
+/* dark mode - webkit */
+html.dark::-webkit-scrollbar-track {
+  background: oklch(0.1 0.02 310);
+}
+
+html.dark::-webkit-scrollbar-thumb {
+  background: oklch(0.28 0.04 320);
+  border-radius: 6px;
+  border: 3px solid oklch(0.1 0.02 310);
+}
+
+html.dark::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, oklch(0.38 0.08 315) 0%, oklch(0.32 0.12 330) 100%);
+  border-radius: 6px;
+  border: 3px solid oklch(0.1 0.02 310);
+}
+
+html.dark::-webkit-scrollbar-thumb:active {
+  background: linear-gradient(180deg, oklch(0.48 0.14 310) 0%, oklch(0.4 0.18 335) 100%);
+  border-radius: 6px;
+  border: 3px solid oklch(0.1 0.02 310);
+}
+
+html.dark::-webkit-scrollbar-corner {
+  background: oklch(0.1 0.02 310);
 }
