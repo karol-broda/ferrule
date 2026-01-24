@@ -109,10 +109,10 @@ use intersection types:
 ```ferrule
 type HashShow<T> = Hashable<T> & Show<T>;
 
-function dedupeAndPrint<T>(items: View<T>, hs: HashShow<T>) -> Unit effects [alloc, io] {
+function dedupeAndPrint<T>(items: View<T>, hs: HashShow<T>, cap io: Io) -> Unit effects [alloc, io] {
   const unique = dedupe(items, hs);
   for item in unique {
-        println(hs.show(item));
+        io.println(hs.show(item));
   }
 }
 ```

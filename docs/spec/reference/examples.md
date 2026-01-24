@@ -138,7 +138,7 @@ function fetch(
   
   const sock = map_error net.connect(url.host, url.port, tok)
                using (function(e: NetError) -> FetchError { 
-                 return Timeout { url: url, ms: time.until(deadline) };
+                 return Timeout { url: url, ms: clock.until(deadline) };
                });
   
   return check request(sock, url, tok) with { op: "request" };
@@ -276,12 +276,12 @@ type Producer<out T> = { get: () -> T };
 type Consumer<in T> = { accept: (T) -> Unit };
 
 // Producer<Cat> is assignable to Producer<Animal>
-function printAnimal(p: Producer<Animal>) -> Unit effects [io] {
+function printAnimal(p: Producer<Animal>, cap io: Io) -> Unit effects [io] {
   io.println(p.get().name);
 }
 
 const catProducer: Producer<Cat> = { get: function() -> Cat { return myCat; } };
-printAnimal(catProducer);  // OK: Cat is Animal
+printAnimal(catProducer, io);  // OK: Cat is Animal
 ```
 
 ---

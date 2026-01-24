@@ -97,10 +97,10 @@ scope.spawn || {
   // task body
 };
 
-// with captured values
+// with captured values (including capabilities)
 const x = 42;
 scope.spawn || {
-  println(x);  // captures x
+  io.println(x);  // captures x and io
 };
 ```
 

@@ -55,8 +55,8 @@ pub import lexer { Token };  // re-export from lexer.fe
 Import by name (resolved via `Package.fe` manifest and `ferrule.lock`):
 
 ```ferrule
-import time { Clock };
-import mylib.http { get, post };
+import time { Duration };
+import mylib.http { Client, Request };
 ```
 
 ---
@@ -66,8 +66,8 @@ import mylib.http { get, post };
 An import can declare that loading requires build-time capability permission:
 
 ```ferrule
-import time { Clock } using capability time;
-import mylib.http { get, post } using capability net;
+import time { Duration } using capability time;
+import mylib.http { Client, Request } using capability net;
 ```
 
 This is **build-time** capability gating — the build tool must have permission `X` to load the import.
@@ -81,7 +81,7 @@ At **runtime**, capabilities are still passed explicitly as values (no ambient a
 For critical dependencies, import by explicit content address:
 
 ```ferrule
-import store://sha256:e1f4a3b2... { io as stdio } using capability fs;
+import store://sha256:e1f4a3b2... { BufferedWriter } using capability fs;
 ```
 
 Direct hash imports:
@@ -108,7 +108,7 @@ Rename imports with `as`:
 
 ```ferrule
 import net.http { Client as HttpClient };
-import store://sha256:... { io as stdio };
+import store://sha256:... { Response as HttpResponse };
 ```
 
 ---
@@ -118,14 +118,15 @@ import store://sha256:... { io as stdio };
 Import specific items:
 
 ```ferrule
-import net.http { get, post, Client };
+import net.http { Client, Request, Response };
 ```
 
 Or import the module namespace:
 
 ```ferrule
 import net.http;
-// use as: http.get(...), http.Client, etc.
+// use as: http.Client, http.Request, etc. (types only)
+// operations like get/post are methods on the Net capability
 ```
 
 ---
@@ -135,7 +136,7 @@ import net.http;
 Imports can override derivation parameters, producing a different content address:
 
 ```ferrule
-import stdlib { io } with { features: { simd: false } };
+import stdlib.collections { Vec } with { features: { simd: false } };
 ```
 
 The `with { ... }` clause:
@@ -150,15 +151,15 @@ The `with { ... }` clause:
 ```ferrule
 package my.app;
 
-// standard imports
-import time { Clock } using capability time;
-import net.http { Client, Response } using capability net;
+// type imports (capabilities are received at runtime, not imported)
+import time { Duration };
+import net.http { Client, Response };
 
 // pinned critical dependency
-import store://sha256:abc123... { crypto } using capability ffi;
+import store://sha256:abc123... { Crypto } using capability ffi;
 
 // modified derivation
-import stdlib { io } with { features: { debug: true } };
+import stdlib.collections { Vec } with { features: { debug: true } };
 ```
 
 

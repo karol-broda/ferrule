@@ -161,7 +161,7 @@ see [../errors/propagation.md](/docs/errors/propagation).
 ## effects declaration
 
 ```ferrule
-function fetch(url: Url, cap net: Net) -> Response error ClientError effects [net, time] {
+function fetch(url: Url, cap net: Net, cap clock: Clock) -> Response error ClientError effects [net, time] {
   // may perform net and time effects
 }
 ```

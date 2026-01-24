@@ -40,8 +40,7 @@ main receives capabilities via special syntax:
 function main(args: Args) -> i32 
     with cap io: Io, cap fs: Fs, cap net: Net, cap clock: Clock
 {
-    // capabilities available here
-    println("hello", io);
+    io.println("hello");
     
     const config = loadConfig("config.json", fs);
     
@@ -113,7 +112,7 @@ function main() with cap io: Io {
 }
 
 function helper(cap io: Io) -> Unit effects [io] {
-    println("hello", io);
+    io.println("hello");
 }
 ```
 
@@ -135,17 +134,17 @@ function main() with cap io: Io {
 ## what you can do
 
 ```ferrule
-// pass to functions (borrow)
-println("hello", io);
+// call methods on capability
+io.println("hello");
 
-// pass to nested scopes
+// use in nested scopes
 if condition {
-    println("in branch", io);
+    io.println("in branch");
 }
 
-// pass to closures (if closure doesn't escape)
+// use in closures (if closure doesn't escape)
 items.forEach(function(item: Item) -> Unit {
-    println(item.name, io);
+    io.println(item.name);
 });
 ```
 

@@ -85,7 +85,7 @@ types are either copy or move. this determines what happens on assignment.
 ```ferrule
 const a: Point = { x: 1.0, y: 2.0 };
 const b = a;      // copied
-println(a.x);     // ok, a still valid
+io.println(a.x);  // ok, a still valid
 ```
 
 **move types** transfer ownership. the original becomes invalid:
@@ -93,7 +93,7 @@ println(a.x);     // ok, a still valid
 ```ferrule
 const s: String = "hello";
 const t = s;      // moved
-// println(s);    // error: s was moved
+// io.println(s); // error: s was moved
 ```
 
 by default:
@@ -112,8 +112,8 @@ to copy a move type, use clone:
 
 ```ferrule
 const u = t.clone();  // explicit copy
-println(t);           // ok, t still valid
-println(u);           // ok, u is independent copy
+io.println(t);        // ok, t still valid
+io.println(u);        // ok, u is independent copy
 ```
 
 see [../memory/ownership.md](/docs/memory/ownership) for more on move semantics.

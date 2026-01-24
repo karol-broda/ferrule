@@ -36,8 +36,8 @@ when you assign a value, one of two things happens:
 ```ferrule
 const a: i32 = 42;
 const b = a;      // a is copied
-println(a);       // ok, a still valid
-println(b);       // ok, b has its own copy
+io.println(a);    // ok, a still valid
+io.println(b);    // ok, b has its own copy
 ```
 
 **move types** transfer ownership:
@@ -45,8 +45,8 @@ println(b);       // ok, b has its own copy
 ```ferrule
 const s: String = "hello";
 const t = s;      // s is moved to t
-// println(s);    // error: s was moved
-println(t);       // ok, t owns the data now
+// io.println(s); // error: s was moved
+io.println(t);    // ok, t owns the data now
 ```
 
 the key difference: copy duplicates, move transfers. after a move, the original is invalid.
@@ -75,7 +75,7 @@ the compiler tracks what's been moved:
 const data: String = "hello";
 process(data);    // data is moved into process
 
-println(data);    // error: data was moved on line 2
+io.println(data); // error: data was moved on line 2
 ```
 
 the error message tells you where the move happened.
@@ -168,8 +168,8 @@ to copy a move type, use `clone`:
 const s: String = "hello";
 const copy = s.clone();  // explicit copy
 
-println(s);     // ok, s still valid
-println(copy);  // ok, copy is independent
+io.println(s);     // ok, s still valid
+io.println(copy);  // ok, copy is independent
 ```
 
 clone is explicit because copying can be expensive. you should think about whether you really need a copy.

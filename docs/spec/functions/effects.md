@@ -25,7 +25,7 @@ no effects means pure. you can tell from the signature whether a function does i
 types go in `<>`, effects go in `[]`:
 
 ```ferrule
-function process<T, U>(input: T) -> U effects [alloc, io] {
+function process<T, U>(input: T, cap io: Io) -> U effects [alloc, io] {
     // ...
 }
 ```
@@ -113,13 +113,13 @@ within a module, the compiler can infer effects from the function body. but publ
 
 ```ferrule
 // private, inference ok
-function helper() {
-    println("hello");  // inferred: effects [io]
+function helper(cap io: Io) {
+    io.println("hello");  // inferred: effects [io]
 }
 
 // public, must be explicit
-pub function api() -> Unit effects [io] {
-    helper();
+pub function api(cap io: Io) -> Unit effects [io] {
+    helper(io);
 }
 ```
 

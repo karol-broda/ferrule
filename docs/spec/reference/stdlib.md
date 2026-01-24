@@ -63,11 +63,10 @@ type View<mut T>;
 
 ## layer 3: std (explicit import)
 
-standard library modules. must be imported.
+standard library modules. must be imported. capability-gated operations (io, fs, net, etc.) are methods on capability values, not imported functions.
 
 ```ferrule
-import std.io { println, print, stdin, stdout };
-import std.fs { File, readFile, writeFile };
+import std.fs { File };                  // types only, operations are on Fs capability
 import std.text { format, split, join };
 import std.math { sin, cos, sqrt, PI };
 import std.mem { copy, zero };
@@ -86,15 +85,14 @@ import std.embedded.arm { NVIC, SCB };
 
 ## how it fits together
 
-user code calls stdlib functions. stdlib functions call runtime functions (implemented in zig). runtime functions call the os.
+user code calls methods on capabilities. these methods call runtime functions (implemented in zig). runtime functions call the os.
 
-example flow for `println("hi")`:
-1. user calls `println("hi")`
-2. `std.io.println` receives the call
-3. `std.io.println` calls `rt_println(ptr, len)` (extern to zig)
-4. zig runtime's `rt_println` calls `write(STDOUT, ptr, len)`
+example flow for `io.println("hi")`:
+1. user calls `io.println("hi")` where `io` is an `Io` capability
+2. `Io.println` method calls `rt_println(ptr, len)` (extern to zig)
+3. zig runtime's `rt_println` calls `write(STDOUT, ptr, len)`
 
-ferrule files define the api. zig runtime provides the implementation. intrinsics bridge the gap for low-level operations.
+capability types define the api. zig runtime provides the implementation. intrinsics bridge the gap for low-level operations.
 
 ## io
 

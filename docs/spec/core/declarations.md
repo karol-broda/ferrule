@@ -122,7 +122,7 @@ using a moved value is a compile error:
 const data: String = "hello";
 const other = data;  // move
 
-println(data);  // error: data was moved
+io.println(data);  // error: data was moved
 ```
 
 the compiler tracks which variables have been moved and errors if you try to use them.
