@@ -1,12 +1,8 @@
-'use client';
-
 import Link from 'next/link';
-import { Dithering } from '@/components/dithering';
+import { ThemeBackground } from '@/components/theme-background';
 import { tv } from 'tailwind-variants';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { useTheme } from 'next-themes';
-import { useSyncExternalStore } from 'react';
 
 const page = tv({
   slots: {
@@ -55,28 +51,23 @@ const featureCard = tv({
   },
 });
 
-const emptySubscribe = () => () => {};
+const styles = page();
+const featureStyles = featureCard();
+
+const c = {
+  comment: 'text-muted-foreground',
+  keyword: 'text-primary',
+  fn: 'text-foreground',
+  param: 'text-purple-400',
+  type: 'text-pink-400',
+  punct: 'text-muted-foreground',
+  string: 'text-green-400',
+};
 
 export default function HomePage() {
-  const styles = page();
-  const { resolvedTheme } = useTheme();
-  const mounted = useSyncExternalStore(emptySubscribe, () => true, () => false);
-
-  const isDark = mounted ? resolvedTheme === 'dark' : true;
-  
   return (
     <div className={styles.wrapper()}>
-      <div className={styles.shaderBg()}>
-        <Dithering
-          colorBack={isDark ? '#0d0614' : '#f5f0fa'}
-          colorFront={isDark ? '#a855f7' : '#9333ea'}
-          type="4x4"
-          size={2}
-          speed={0.15}
-          scale={1.2}
-          style={{ width: '100%', height: '100%' }}
-        />
-      </div>
+      <ThemeBackground className={styles.shaderBg()} />
 
       <div className={styles.gradientOverlay()} />
       <div className={styles.radialOverlay()} />
@@ -153,7 +144,36 @@ export default function HomePage() {
                 <span className={styles.codePreviewFilename()}>hello.fe</span>
               </div>
               <pre className={styles.codePreviewBody()}>
-                <Code />
+                <code>
+                  <span className={c.comment}>{'// explicit capabilities, no ambient authority'}</span>
+                  {'\n'}
+                  <span className={c.keyword}>function</span>
+                  {' '}
+                  <span className={c.fn}>main</span>
+                  <span className={c.punct}>(</span>
+                  <span className={c.keyword}>cap</span>
+                  {' '}
+                  <span className={c.param}>io</span>
+                  <span className={c.punct}>{': '}</span>
+                  <span className={c.type}>IO</span>
+                  <span className={c.punct}>{')'}</span>
+                  {' '}
+                  <span className={c.keyword}>effects</span>
+                  {' '}
+                  <span className={c.punct}>{'['}</span>
+                  <span className={c.type}>io</span>
+                  <span className={c.punct}>{'] {'}</span>
+                  {'\n'}
+                  {'  '}
+                  <span className={c.fn}>io</span>
+                  <span className={c.punct}>.</span>
+                  <span className={c.fn}>println</span>
+                  <span className={c.punct}>(</span>
+                  <span className={c.string}>{'"hello, world"'}</span>
+                  <span className={c.punct}>);</span>
+                  {'\n'}
+                  <span className={c.punct}>{'}'}</span>
+                </code>
               </pre>
             </div>
           </div>
@@ -212,61 +232,14 @@ function FeatureCard({
   title: string;
   description: string;
 }) {
-  const styles = featureCard();
-  
   return (
-    <div className={styles.base()}>
-      <div className={styles.hoverOverlay()} />
-      <div className={styles.content()}>
-        <span className={styles.icon()}>{icon}</span>
-        <h3 className={styles.title()}>{title}</h3>
-        <p className={styles.description()}>{description}</p>
+    <div className={featureStyles.base()}>
+      <div className={featureStyles.hoverOverlay()} />
+      <div className={featureStyles.content()}>
+        <span className={featureStyles.icon()}>{icon}</span>
+        <h3 className={featureStyles.title()}>{title}</h3>
+        <p className={featureStyles.description()}>{description}</p>
       </div>
     </div>
-  );
-}
-
-const c = {
-  comment: 'text-muted-foreground',
-  keyword: 'text-primary',
-  fn: 'text-foreground',
-  param: 'text-purple-400',
-  type: 'text-pink-400',
-  punct: 'text-muted-foreground',
-  string: 'text-green-400',
-};
-
-function Code() {
-  return (
-    <code>
-      <span className={c.comment}>{'// explicit capabilities, no ambient authority'}</span>
-      {'\n'}
-      <span className={c.keyword}>function</span>
-      {' '}
-      <span className={c.fn}>main</span>
-      <span className={c.punct}>(</span>
-      <span className={c.keyword}>cap</span>
-      {' '}
-      <span className={c.param}>io</span>
-      <span className={c.punct}>{': '}</span>
-      <span className={c.type}>IO</span>
-      <span className={c.punct}>{')'}</span>
-      {' '}
-      <span className={c.keyword}>effects</span>
-      {' '}
-      <span className={c.punct}>{'['}</span>
-      <span className={c.type}>io</span>
-      <span className={c.punct}>{'] {'}</span>
-      {'\n'}
-      {'  '}
-      <span className={c.fn}>io</span>
-      <span className={c.punct}>.</span>
-      <span className={c.fn}>println</span>
-      <span className={c.punct}>(</span>
-      <span className={c.string}>{'"hello, world"'}</span>
-      <span className={c.punct}>);</span>
-      {'\n'}
-      <span className={c.punct}>{'}'}</span>
-    </code>
   );
 }
