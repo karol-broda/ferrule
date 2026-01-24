@@ -245,10 +245,18 @@ function Code() {
       {' '}
       <span className={c.fn}>main</span>
       <span className={c.punct}>(</span>
+      <span className={c.keyword}>cap</span>
+      {' '}
       <span className={c.param}>io</span>
       <span className={c.punct}>{': '}</span>
-      <span className={c.type}>cap IO</span>
-      <span className={c.punct}>{') {'}</span>
+      <span className={c.type}>IO</span>
+      <span className={c.punct}>{')'}</span>
+      {' '}
+      <span className={c.keyword}>effects</span>
+      {' '}
+      <span className={c.punct}>{'['}</span>
+      <span className={c.type}>io</span>
+      <span className={c.punct}>{'] {'}</span>
       {'\n'}
       {'  '}
       <span className={c.fn}>io</span>

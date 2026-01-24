@@ -1,6 +1,7 @@
 import { defineConfig, defineDocs, frontmatterSchema, metaSchema } from 'fumadocs-mdx/config';
 import { z } from 'zod';
 import { ferruleLanguage } from '@ferrule/shiki';
+import { ferruleDark, ferruleLight } from './src/lib/shiki-themes';
 
 const specFrontmatter = frontmatterSchema.extend({
   status: z.string().optional(),
@@ -49,8 +50,8 @@ export default defineConfig({
   mdxOptions: {
     rehypeCodeOptions: {
       themes: {
-        light: 'github-light',
-        dark: 'github-dark',
+        light: ferruleLight,
+        dark: ferruleDark,
       },
       langs: [ferruleLanguage],
       defaultLanguage: 'text',
