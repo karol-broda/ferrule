@@ -3,6 +3,8 @@ import { ThemeBackground } from '@/components/theme-background';
 import { tv } from 'tailwind-variants';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { LockSimpleIcon, WarningDiamondIcon, LightningIcon, ShieldCheckIcon } from '@phosphor-icons/react/dist/ssr';
+import { Icon } from '@phosphor-icons/react';
 
 const page = tv({
   slots: {
@@ -181,22 +183,22 @@ export default function HomePage() {
 
         <div className={styles.featuresGrid()}>
           <FeatureCard
-            icon="◇"
+            icon={LockSimpleIcon}
             title="immutability first"
             description="const by default, var when you need mutation, inout for explicit by-reference"
           />
           <FeatureCard
-            icon="◈"
+            icon={WarningDiamondIcon}
             title="errors as values"
             description="no exceptions, typed error domains, lightweight propagation with check"
           />
           <FeatureCard
-            icon="◊"
+            icon={LightningIcon}
             title="explicit effects"
             description="functions declare what they do, async is just another effect"
           />
           <FeatureCard
-            icon="⬡"
+            icon={ShieldCheckIcon}
             title="capability security"
             description="no ambient authority, fs/net/clock are values you pass"
           />
@@ -224,11 +226,11 @@ export default function HomePage() {
 }
 
 function FeatureCard({
-  icon,
+  icon: IconComponent,
   title,
   description,
 }: {
-  icon: string;
+  icon: Icon;
   title: string;
   description: string;
 }) {
@@ -236,7 +238,7 @@ function FeatureCard({
     <div className={featureStyles.base()}>
       <div className={featureStyles.hoverOverlay()} />
       <div className={featureStyles.content()}>
-        <span className={featureStyles.icon()}>{icon}</span>
+        <IconComponent weight="duotone" className={featureStyles.icon()} />
         <h3 className={featureStyles.title()}>{title}</h3>
         <p className={featureStyles.description()}>{description}</p>
       </div>

@@ -54,6 +54,7 @@ the key difference: copy duplicates, move transfers. after a move, the original 
 ## which types are copy vs move
 
 by default:
+
 - primitives (i32, f64, bool, etc) are copy
 - small structs (roughly < 64 bytes) are copy
 - heap-backed types (String, Vec, Box) are move
@@ -185,11 +186,13 @@ type Clone<T> = {
 ## why not a borrow checker
 
 a borrow checker (like rust's) can prove more programs safe. but it has costs:
+
 - complex error messages
 - fighting the compiler
 - lifetime annotations infect your code
 
 ferrule's model is simpler:
+
 - easy to understand rules
 - predictable behavior
 - explicit copies when needed
@@ -199,6 +202,7 @@ the tradeoff is you copy more. for most programs, this is fine. the copies are e
 ## safety guarantees
 
 this model eliminates:
+
 - **double free** - regions free everything at once
 - **use after free** - views can't escape their scope
 - **dangling pointers** - compile-time tracking
@@ -213,7 +217,6 @@ these bugs are compile errors, not runtime crashes.
 function bad() -> View<u8> {
     const arena = region.arena(1024);
     defer arena.dispose();
-    
     const buf = arena.alloc<u8>(100);
     return buf;  // error: buf escapes its region
 }
